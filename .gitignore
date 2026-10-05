@@ -1,0 +1,114 @@
+# =============================================================================
+# SmartFinance - .gitignore
+# Python / Flask / SQLite / Windows
+# =============================================================================
+
+# ------------------------------------
+# Banco de Dados (dados pessoais)
+# ------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+database.json
+backup_*.json
+
+# ------------------------------------
+# Python
+# ------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# Distribuição / empacotamento
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# Pytest / Coverage
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# mypy / pyright
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+
+# ------------------------------------
+# Flask / Aplicação
+# ------------------------------------
+instance/
+*.log
+flask_session/
+
+# ------------------------------------
+# Variáveis de Ambiente / Segredos
+# ------------------------------------
+.env
+.env.*
+!.env.example
+secrets.py
+config_local.py
+
+# ------------------------------------
+# IDEs e Editores
+# ------------------------------------
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm / JetBrains
+.idea/
+*.iml
+
+# Vim / Emacs
+*.swp
+*.swo
+*~
+\#*\#
+
+# ------------------------------------
+# Sistema Operacional (Windows)
+# ------------------------------------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS (caso colaboradores usem Mac)
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ------------------------------------
+# Node / Front-end (caso venha a usar)
+# ------------------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ------------------------------------
+# Temporários e uploads
+# ------------------------------------
+*.tmp
+*.bak
+*.orig
+uploads/
+temp/
+

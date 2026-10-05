@@ -1,0 +1,475 @@
+/* ==========================================================================
+   SmartFinance - Design Monocromático de Alto Contraste & Aceleração por GPU
+   Paleta: Preto, Branco e Cinza no site; Cores puras apenas nos Botões de Ação.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+    --font-main: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+    /* Base Monocromática do Site (Preto, Branco e Tons de Cinza) */
+    --bg-body: #f4f5f7;
+    --bg-surface: #ffffff;
+    --bg-surface-subtle: #f8fafc;
+    --bg-dark: #000000;
+    --border-color: #e2e8f0;
+    --border-color-dark: #cbd5e1;
+
+    --text-main: #09090b;
+    --text-muted: #64748b;
+    --text-light: #94a3b8;
+
+    /* Cores Vivas EXCLUSIVAS para Botões de Ação (Alto Contraste) */
+    --btn-primary-bg: #2563eb;
+    --btn-primary-hover: #1d4ed8;
+
+    --btn-success-bg: #16a34a;
+    --btn-success-hover: #15803d;
+
+    --btn-danger-bg: #dc2626;
+    --btn-danger-hover: #b91c1c;
+
+    --btn-warning-bg: #d97706;
+    --btn-warning-hover: #b45309;
+
+    --btn-neutral-bg: #4b5563;
+    --btn-neutral-hover: #374151;
+
+    /* Formas e Sombras Suaves (GPU Otimizada) */
+    --radius-card: 16px;
+    --radius-pill: 9999px;
+    --radius-btn: 10px;
+
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+    --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+/* ==================== OTIMIZAÇÃO DE PERFORMANCE (GPU) ==================== */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: var(--font-main);
+    background-color: var(--bg-body);
+    color: var(--text-main);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    letter-spacing: -0.2px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Forçar Camada de Composição na GPU para evitar software rendering */
+.card-clean,
+.card-kpi-clean,
+.credit-card-ui,
+.navbar,
+.modal-content,
+.btn-action {
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+
+/* ==================== NAVBAR (LIQUID GLASS — TRANSLUCÊNCIA ALTA) ==================== */
+.navbar-smart {
+    background: rgba(8, 8, 12, 0.45) !important;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    padding-top: 0.65rem;
+    padding-bottom: 0.65rem;
+    position: sticky;
+    top: 0;
+    z-index: 1030;
+}
+
+.navbar-brand-smart {
+    font-weight: 800;
+    font-size: 1.3rem;
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #ffffff !important;
+}
+
+.navbar-brand-smart .brand-box {
+    width: 36px;
+    height: 36px;
+    background-color: #ffffff;
+    color: #000000;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 900;
+}
+
+.nav-link {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #a1a1aa !important;
+    transition: color 0.15s ease, background-color 0.15s ease;
+    border-radius: 8px;
+    padding: 0.45rem 0.8rem !important;
+    margin: 0 2px;
+}
+
+.nav-link:hover {
+    color: #ffffff !important;
+    background-color: #27272a;
+}
+
+.nav-link.active {
+    background-color: #27272a;
+    color: #ffffff !important;
+    border: 1px solid #3f3f46;
+}
+
+/* ==================== BOTÕES DE AÇÃO COM CORES VIVAS (FOCO TOTAL) ==================== */
+.btn-action {
+    font-weight: 700;
+    font-size: 0.88rem;
+    border-radius: var(--radius-btn);
+    padding: 0.55rem 1.15rem;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: transform 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+    cursor: pointer;
+}
+
+.btn-action:hover {
+    transform: translateY(-1px);
+}
+
+.btn-action:active {
+    transform: translateY(0);
+}
+
+/* Botão Ação Primária (Azul Sólido) */
+.btn-primary-action {
+    background-color: var(--btn-primary-bg);
+    color: #ffffff;
+    box-shadow: 0 2px 10px rgba(37, 99, 235, 0.45), 0 0 22px rgba(37, 99, 235, 0.25);
+}
+.btn-primary-action:hover {
+    background-color: var(--btn-primary-hover);
+    color: #ffffff;
+    box-shadow: 0 4px 18px rgba(37, 99, 235, 0.65), 0 0 32px rgba(37, 99, 235, 0.4);
+}
+
+/* Botão Ação Sucesso / Salvar (Verde Sólido) */
+.btn-success-action {
+    background-color: var(--btn-success-bg);
+    color: #ffffff;
+    box-shadow: 0 2px 10px rgba(22, 163, 74, 0.45), 0 0 22px rgba(22, 163, 74, 0.25);
+}
+.btn-success-action:hover {
+    background-color: var(--btn-success-hover);
+    color: #ffffff;
+    box-shadow: 0 4px 18px rgba(22, 163, 74, 0.65), 0 0 32px rgba(22, 163, 74, 0.4);
+}
+
+/* Botão Ação Perigo / Sair (Vermelho Sólido) */
+.btn-danger-action {
+    background-color: var(--btn-danger-bg);
+    color: #ffffff;
+    box-shadow: 0 2px 10px rgba(220, 38, 38, 0.45), 0 0 22px rgba(220, 38, 38, 0.25);
+}
+.btn-danger-action:hover {
+    background-color: var(--btn-danger-hover);
+    color: #ffffff;
+    box-shadow: 0 4px 18px rgba(220, 38, 38, 0.65), 0 0 32px rgba(220, 38, 38, 0.4);
+}
+
+/* Botão Ajustes / Aviso (Âmbar Sólido) */
+.btn-warning-action {
+    background-color: var(--btn-warning-bg);
+    color: #ffffff;
+    box-shadow: 0 2px 10px rgba(217, 119, 6, 0.45), 0 0 22px rgba(217, 119, 6, 0.25);
+}
+.btn-warning-action:hover {
+    background-color: var(--btn-warning-hover);
+    color: #ffffff;
+    box-shadow: 0 4px 18px rgba(217, 119, 6, 0.65), 0 0 32px rgba(217, 119, 6, 0.4);
+}
+
+/* Botão Neutro (Cinza Sólido) */
+.btn-neutral-action {
+    background-color: var(--btn-neutral-bg);
+    color: #ffffff;
+    box-shadow: 0 2px 6px rgba(75, 85, 99, 0.3);
+}
+.btn-neutral-action:hover {
+    background-color: var(--btn-neutral-hover);
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(75, 85, 99, 0.45);
+}
+
+/* ==================== BADGE DE CATEGORIA COM COR DINÂMICA ==================== */
+.cat-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px 3px 6px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    border: 1.5px solid transparent;
+}
+
+.cat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+/* Hint de auto-categorização abaixo do campo de descrição */
+.auto-cat-hint {
+    font-size: 0.78rem;
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 20px;
+    transition: opacity 0.2s ease;
+}
+
+/* ==================== CARDS & ESTRUTURA (PRETO, BRANCO E CINZA) ==================== */
+.card-clean {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-clean:hover {
+    box-shadow: var(--shadow-hover);
+}
+
+/* KPIs Monocromáticos de Alto Contraste */
+.card-kpi-clean {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-card);
+    padding: 1.15rem;
+    box-shadow: var(--shadow-card);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.card-kpi-clean:hover {
+    border-color: #000000;
+    transform: translateY(-2px);
+}
+
+.card-kpi-clean .kpi-icon-box {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background-color: #f1f5f9;
+    color: #0f172a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    border: 1px solid #e2e8f0;
+}
+
+.card-kpi-clean .kpi-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+}
+
+.card-kpi-clean .kpi-val {
+    font-size: 1.55rem;
+    font-weight: 800;
+    letter-spacing: -0.6px;
+    color: var(--text-main);
+    line-height: 1.15;
+}
+
+/* ==================== DESIGN DOS CARTÕES (MANTIDO E PROTEGIDO) ==================== */
+.credit-card-ui {
+    border-radius: 18px;
+    padding: 1.5rem;
+    color: #ffffff;
+    position: relative;
+    overflow: hidden;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.credit-card-ui:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.25);
+}
+
+.credit-card-chip {
+    width: 42px;
+    height: 30px;
+    background-color: #eab308;
+    border-radius: 5px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    position: relative;
+}
+
+.credit-card-chip::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgba(0,0,0,0.3);
+}
+
+/* ==================== FORMULÁRIOS & SELETORES ==================== */
+.form-control, .form-select {
+    border-radius: 10px;
+    border: 1px solid var(--border-color-dark);
+    background-color: #ffffff;
+    padding: 0.65rem 0.95rem;
+    font-size: 0.92rem;
+    font-weight: 500;
+    color: var(--text-main);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: #000000;
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.08);
+}
+
+/* Seletor de Mês */
+.month-selector-clean {
+    background-color: #ffffff;
+    border: 1px solid var(--border-color-dark);
+    border-radius: var(--radius-pill);
+    padding: 0.25rem 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: var(--shadow-card);
+}
+
+.month-selector-clean .btn-month-nav {
+    border-radius: var(--radius-pill);
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    color: var(--text-main);
+    border: none;
+    background: transparent;
+    transition: background-color 0.15s ease;
+}
+
+.month-selector-clean .btn-month-nav:hover {
+    background-color: #e2e8f0;
+}
+
+.month-selector-clean .month-label {
+    font-weight: 800;
+    font-size: 1rem;
+    min-width: 175px;
+    text-align: center;
+    color: var(--text-main);
+}
+
+/* Tabelas Monocromáticas de Alto Contraste */
+.table-custom {
+    vertical-align: middle;
+    margin-bottom: 0;
+}
+
+.table-custom thead th {
+    background-color: #f1f5f9;
+    color: #475569;
+    font-weight: 800;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid #cbd5e1;
+    padding: 0.85rem 1rem;
+}
+
+.table-custom tbody td {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.9rem;
+    color: var(--text-main);
+}
+
+.table-custom tbody tr:hover {
+    background-color: #f8fafc;
+}
+
+/* Modais Monocromáticos Limpos */
+.modal-content-clean {
+    background-color: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+}
+
+.modal-header-clean {
+    border-bottom: 1px solid #e2e8f0;
+    padding: 1.15rem 1.5rem;
+    background-color: #ffffff;
+}
+
+.modal-footer-clean {
+    border-top: 1px solid #e2e8f0;
+    padding: 1rem 1.5rem;
+    background-color: #f8fafc;
+}
+
+/* Barra de Progresso Suave */
+.progress-clean {
+    height: 8px;
+    border-radius: var(--radius-pill);
+    background-color: #e2e8f0;
+    overflow: hidden;
+}
+
+.progress-clean .progress-bar {
+    border-radius: var(--radius-pill);
+    background-color: #0f172a;
+    transition: width 0.4s ease;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .card-kpi-clean .kpi-val {
+        font-size: 1.25rem;
+    }
+    .month-selector-clean .month-label {
+        font-size: 0.9rem;
+        min-width: 140px;
+    }
+}

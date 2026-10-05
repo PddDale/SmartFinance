@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+
+{% block title %}SmartFinance &bull; Visão Anual{% endblock %}
+
+{% block content %}
+<div class="pt-3">
+
+    <!-- CABEÇALHO DA PÁGINA -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-bold text-dark mb-0">Visão Anual e Comparativo</h1>
+            <p class="text-muted small mb-0">Análise de gastos categoria por categoria ao longo de todos os 12 meses do ano.</p>
+        </div>
+
+        <!-- Seletor de Ano -->
+        <form method="GET" action="{{ url_for('anual') }}" class="d-flex align-items-center gap-2">
+            <label class="small text-muted fw-bold">Ano de Referência:</label>
+            <select name="ano" class="form-select form-select-sm fw-bold" style="width: 120px;" onchange="this.form.submit()">
+                {% for y in range(global_ano_atual - 2, global_ano_atual + 4) %}
+                    <option value="{{ y }}" {% if ano == y %}selected{% endif %}>{{ y }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    <!-- CARDS DE RESUMO DO ANO (MONOCROMÁTICOS) -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card card-clean p-3">
+                <span class="text-muted small fw-bold text-uppercase">Renda Anual Projetada</span>
+                <h3 class="fw-bold text-dark mt-1 mb-0">{{ dados.total_anual_renda | moeda }}</h3>
+                <small class="text-muted">12 meses de renda cadastrada</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card card-clean p-3">
+                <span class="text-muted small fw-bold text-uppercase">Gasto Total no Ano</span>
+                <h3 class="fw-bold text-dark mt-1 mb-0">{{ dados.total_anual_gastos | moeda }}</h3>
+                <small class="text-muted">Soma de todas as despesas</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card card-clean p-3">
+                <span class="text-muted small fw-bold text-uppercase">Saldo Acumulado no Ano</span>
+                <h3 class="fw-bold text-dark mt-1 mb-0">
+                    {{ dados.saldo_anual | moeda }}
+                </h3>
+                <small class="text-muted">Capacidade de poupança anual</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card card-clean p-3">
+                <span class="text-muted small fw-bold text-uppercase">Média Mensal de Gastos</span>
+                <h3 class="fw-bold text-dark mt-1 mb-0">{{ dados.media_mensal_gastos | moeda }}</h3>
+                <small class="text-muted">Despesa média por mês</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- GRÁFICOS ANUAIS (GPU OTIMIZADA) -->
+    <div class="row g-3 mb-4">
+        <!-- Gráfico 1: Renda vs Gastos nos 12 meses -->
+        <div class="col-12 col-lg-6">
+            <div class="card card-clean h-100">
+                <div class="card-header bg-white border-bottom py-3 px-4">
+                    <h5 class="fw-bold mb-0 text-dark">
+                        <i class="bi bi-bar-chart-line me-2"></i>Renda vs. Despesas Mês a Mês ({{ ano }})
+                    </h5>
+                </div>
+                <div class="card-body p-3">
+                    <div style="position: relative; width: 100%; height: 280px;">
+                        <canvas id="chartRendaGastosAnual"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gráfico 2: Evolução dos Gastos por Categoria -->
+        <div class="col-12 col-lg-6">
+            <div class="card card-clean h-100">
+                <div class="card-header bg-white border-bottom py-3 px-4">
+                    <h5 class="fw-bold mb-0 text-dark">
+                        <i class="bi bi-stack me-2"></i>Composição de Gastos por Categoria ({{ ano }})
+                    </h5>
+                </div>
+                <div class="card-body p-3">
+                    <div style="position: relative; width: 100%; height: 280px;">
+                        <canvas id="chartCategoriasAnual"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABELA COMPARATIVA ANUAL (MATRIZ 12 MESES) -->
+    <div class="card card-clean overflow-hidden mb-4">
+        <div class="card-header bg-white border-bottom py-3 px-4 d-flex justify-content-between align-items-center">
+            <div>
+                <h5 class="fw-bold mb-0 text-dark">
+                    <i class="bi bi-table me-2"></i>Tabela Comparativa de Gastos por Categoria ({{ ano }})
+                </h5>
+                <small class="text-muted">Visão completa dos 12 meses idêntica à planilha do Excel.</small>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm table-hover mb-0 text-center" style="font-size: 0.85rem;">
+                <thead class="table-light">
+                    <tr>
+                        <th class="text-start" style="min-width: 140px;">Categoria</th>
+                        {% for m in dados.meses_labels %}
+                            <th>{{ m }}</th>
+                        {% endfor %}
+                        <th class="table-dark text-white fw-bold">Total Ano</th>
+                        <th class="table-light text-dark">Média/Mês</th>
+                        <th style="width: 70px;">% Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for linha in dados.tabela %}
+                    <tr>
+                        <td class="text-start fw-bold">
+                            <span class="d-inline-block rounded-circle me-1" style="width: 8px; height: 8px; background-color: #0f172a;"></span>
+                            {{ linha.categoria }}
+                        </td>
+                        {% for val in linha.meses %}
+                            <td class="{% if val > 0 %}text-dark fw-bold{% else %}text-muted{% endif %}">
+                                {% if val > 0 %}{{ val | moeda }}{% else %}-{% endif %}
+                            </td>
+                        {% endfor %}
+                        <td class="table-light fw-bold text-dark">{{ linha.total_ano | moeda }}</td>
+                        <td class="fw-semibold text-secondary">{{ linha.media_mensal | moeda }}</td>
+                        <td><span class="badge bg-light text-dark border">{{ linha.percentual_total }}%</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot class="table-light fw-bold">
+                    <!-- Linha: Total de Gastos -->
+                    <tr>
+                        <td class="text-start">Total Despesas</td>
+                        {% for val in dados.gastos_totais_mensais %}
+                            <td>{{ val | moeda }}</td>
+                        {% endfor %}
+                        <td>{{ dados.total_anual_gastos | moeda }}</td>
+                        <td>{{ dados.media_mensal_gastos | moeda }}</td>
+                        <td>100%</td>
+                    </tr>
+                    <!-- Linha: Renda Mensal -->
+                    <tr>
+                        <td class="text-start">Renda Mensal</td>
+                        {% for val in dados.renda_mensal_lista %}
+                            <td>{{ val | moeda }}</td>
+                        {% endfor %}
+                        <td>{{ dados.total_anual_renda | moeda }}</td>
+                        <td>{{ dados.renda_mensal_lista[0] | moeda }}</td>
+                        <td>-</td>
+                    </tr>
+                    <!-- Linha: Saldo Líquido -->
+                    <tr>
+                        <td class="text-start">Saldo Líquido</td>
+                        {% for val in dados.saldo_liquido_mensal %}
+                            <td class="{% if val >= 0 %}text-dark fw-bold{% else %}text-muted{% endif %}">
+                                {{ val | moeda }}
+                            </td>
+                        {% endfor %}
+                        <td class="text-dark fw-bold">
+                            {{ dados.saldo_anual | moeda }}
+                        </td>
+                        <td>-</td>
+                        <td>-</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const labels = {{ dados.meses_labels | tojson }};
+    const gastosTotais = {{ dados.gastos_totais_mensais | tojson }};
+    const rendaMensal = {{ dados.renda_mensal_lista | tojson }};
+
+    // 1. Gráfico Renda vs Despesas
+    const ctxRG = document.getElementById("chartRendaGastosAnual");
+    if (ctxRG) {
+        new Chart(ctxRG, {
+            type: "bar",
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: "Renda (R$)",
+                        data: rendaMensal,
+                        backgroundColor: "#09090b", // Preto sólido
+                        borderRadius: 4
+                    },
+                    {
+                        label: "Despesas (R$)",
+                        data: gastosTotais,
+                        backgroundColor: "#94a3af", // Cinza médio
+                        borderRadius: 4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 300 },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: {
+                        ticks: {
+                            callback: function(v) { return "R$ " + v.toLocaleString('pt-BR'); }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: { position: "top", labels: { boxWidth: 12 } }
+                }
+            }
+        });
+    }
+
+    // 2. Gráfico Categorias Empilhadas Monocromático
+    const datasetsCat = {{ dados.datasets_categorias | tojson }};
+    const grayColors = ["#09090b", "#27272a", "#3f3f46", "#52525b", "#71717a", "#a1a1aa", "#d4d4d8", "#18181b", "#78716c", "#57534e", "#44403c"];
+    datasetsCat.forEach((ds, idx) => {
+        ds.backgroundColor = grayColors[idx % grayColors.length];
+    });
+
+    const ctxCat = document.getElementById("chartCategoriasAnual");
+    if (ctxCat && datasetsCat.length > 0) {
+        new Chart(ctxCat, {
+            type: "bar",
+            data: {
+                labels: labels,
+                datasets: datasetsCat
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 300 },
+                scales: {
+                    x: { stacked: true, grid: { display: false } },
+                    y: {
+                        stacked: true,
+                        ticks: {
+                            callback: function(v) { return "R$ " + v.toLocaleString('pt-BR'); }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: "top",
+                        labels: { boxWidth: 10, font: { size: 10 } }
+                    }
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

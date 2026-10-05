@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block title %}SmartFinance &bull; Lançamentos Avulsos{% endblock %}
+
+{% block content %}
+<div class="pt-3">
+
+    <!-- CABEÇALHO DA PÁGINA -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-bold text-dark mb-0">Lançamentos Avulsos (Gastos Diários)</h1>
+            <p class="text-muted small mb-0">Gerencie todos os seus registros de compras, pagamentos e despesas do dia a dia.</p>
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn-action btn-primary-action" data-bs-toggle="modal" data-bs-target="#modalNovoLancamento">
+                <i class="bi bi-plus-circle"></i> Novo Lançamento
+            </button>
+        </div>
+    </div>
+
+    <!-- PAINEL DE FILTROS E BUSCA (MONOCROMÁTICO) -->
+    <div class="card card-clean p-3 mb-4">
+        <form method="GET" action="{{ url_for('lancamentos') }}" class="row g-2 align-items-end">
+            <!-- Busca por texto -->
+            <div class="col-12 col-md-3">
+                <label class="form-label small fw-bold text-muted">Buscar por descrição</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-white text-muted border-end-0"><i class="bi bi-search"></i></span>
+                    <input type="text" name="busca" class="form-control border-start-0" placeholder="Ex: Farmácia, Café..." value="{{ filtro_busca }}">
+                </div>
+            </div>
+
+            <!-- Filtro Mês -->
+            <div class="col-6 col-md-2">
+                <label class="form-label small fw-bold text-muted">Mês de Competência</label>
+                <input type="month" name="mes" class="form-control" value="{{ filtro_mes }}">
+            </div>
+
+            <!-- Filtro Categoria -->
+            <div class="col-6 col-md-3">
+                <label class="form-label small fw-bold text-muted">Categoria</label>
+                <select name="categoria" class="form-select">
+                    <option value="">Todas as Categorias</option>
+                    {% for cat in global_categorias %}
+                        <option value="{{ cat.categoria }}" {% if filtro_cat == cat.categoria %}selected{% endif %}>{{ cat.categoria }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Filtro Método de Pagamento -->
+            <div class="col-6 col-md-2">
+                <label class="form-label small fw-bold text-muted">Método</label>
+                <select name="metodo" class="form-select">
+                    <option value="">Todos</option>
+                    <option value="Conta Corrente" {% if filtro_metodo == 'Conta Corrente' %}selected{% endif %}>Conta Corrente</option>
+                    <option value="Pix" {% if filtro_metodo == 'Pix' %}selected{% endif %}>Pix</option>
+                    <option value="Dinheiro" {% if filtro_metodo == 'Dinheiro' %}selected{% endif %}>Dinheiro</option>
+                    {% for c in global_cartoes %}
+                        <option value="cartao_{{ c.id }}" {% if filtro_metodo == 'cartao_' ~ c.id %}selected{% endif %}>Cartão: {{ c.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Botões Filtrar e Limpar -->
+            <div class="col-6 col-md-2 d-flex gap-2">
+                <button type="submit" class="btn-action btn-primary-action flex-grow-1 justify-content-center">
+                    <i class="bi bi-funnel"></i> Filtrar
+                </button>
+                <a href="{{ url_for('lancamentos') }}" class="btn-action btn-neutral-action" title="Limpar Filtros">
+                    <i class="bi bi-x-lg"></i>
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- BARRA DE STATUS / TOTAIS FILTRADOS -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <span class="text-muted small">
+            Exibindo <strong>{{ lancamentos | length }}</strong> lançamento(s)
+        </span>
+        <div class="badge bg-white text-dark border p-2 fs-6 rounded-pill">
+            Total Selecionado: <strong class="text-dark">{{ total_filtrado | moeda }}</strong>
+        </div>
+    </div>
+
+    <!-- TABELA PRINCIPAL DE LANÇAMENTOS -->
+    <div class="card card-clean overflow-hidden mb-4">
+        <div class="table-responsive">
+            <table class="table table-custom mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 100px;">Data</th>
+                        <th>Descrição</th>
+                        <th>Categoria</th>
+                        <th>Método / Cartão</th>
+                        <th>Vencimento / Fatura</th>
+                        <th>Observação</th>
+                        <th class="text-end">Valor (R$)</th>
+                        <th class="text-center" style="width: 100px;">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for l in lancamentos %}
+                    <tr>
+                        <td class="text-muted small fw-semibold">{{ l.data | data_br }}</td>
+                        <td>
+                            <span class="fw-bold text-dark">{{ l.descricao }}</span>
+                        </td>
+                        <td>
+                            {% set cor = l.categoria_cor or '#6b7280' %}
+                            {% set icone = l.categoria_icone or 'bi-tags' %}
+                            <span class="cat-badge"
+                                  style="background-color: {{ cor }}18; border-color: {{ cor }}55; color: {{ cor }};">
+                                <span class="cat-dot" style="background-color: {{ cor }};"></span>
+                                <i class="bi {{ icone }} me-1" style="font-size:0.7rem;"></i>{{ l.categoria }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if l.cartao_nome %}
+                                <span class="badge bg-dark text-white">
+                                    <i class="bi bi-credit-card me-1"></i>{{ l.cartao_nome }}
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-dark border">
+                                    {{ l.metodo_pagamento }}
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="small text-muted">
+                            {% if l.cartao_id %}
+                                <span class="text-dark fw-bold"><i class="bi bi-calendar-event me-1"></i>Venc: {{ l.data_vencimento | data_br }}</span>
+                                <small class="text-muted d-block">(Fatura {{ l.fatura_mes }})</small>
+                            {% else %}
+                                <span>{{ l.data | data_br }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="small text-muted">
+                            {{ l.observacao or '-' }}
+                        </td>
+                        <td class="text-end fw-bold text-dark fs-6">
+                            -{{ l.valor | moeda }}
+                        </td>
+                        <td class="text-center">
+                            <div class="btn-group btn-group-sm">
+                                <!-- Botão Editar -->
+                                <button type="button" class="btn btn-outline-dark btn-sm rounded-start-pill"
+                                        title="Editar Lançamento"
+                                        onclick="preencherModalEdicaoLancamento(
+                                            '{{ l.id }}',
+                                            '{{ l.data }}',
+                                            '{{ l.descricao | escape }}',
+                                            '{{ l.categoria }}',
+                                            '{{ l.valor }}',
+                                            '{{ l.metodo_pagamento }}',
+                                            '{{ l.cartao_id or '' }}',
+                                            '{{ l.observacao or '' | escape }}'
+                                        )">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+
+                                <!-- Botão Excluir (Ação Vermelha) -->
+                                <form action="{{ url_for('excluir_lancamento', id=l.id) }}" method="POST" onsubmit="return confirm('Tem certeza que deseja excluir este lançamento?');" class="d-inline">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm rounded-end-pill" title="Excluir">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="bi bi-inbox fs-1 d-block mb-2 text-muted"></i>
+                            Nenhum lançamento encontrado com os filtros selecionados.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- MODAL DE EDIÇÃO DE LANÇAMENTO -->
+<div class="modal fade" id="modalEditarLancamento" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content modal-content-clean">
+            <div class="modal-header modal-header-clean">
+                <h5 class="modal-title fw-bold text-dark">
+                    <i class="bi bi-pencil-square me-2"></i>Editar Lançamento
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="formEditarLancamento" method="POST">
+                <div class="modal-body p-4">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Data do Gasto</label>
+                            <input type="date" class="form-control" name="data" id="edit_data" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Valor (R$)</label>
+                            <input type="number" step="0.01" min="0.01" class="form-control fw-bold" name="valor" id="edit_valor" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-muted">Descrição</label>
+                            <input type="text" class="form-control" name="descricao" id="edit_descricao"
+                                   required autocomplete="off"
+                                   data-cat-target="edit_categoria">
+                            <div class="auto-cat-hint text-muted" id="edit_cat_hint"></div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Categoria</label>
+                            <select class="form-select" name="categoria" id="edit_categoria" required>
+                                {% for cat in global_categorias %}
+                                    <option value="{{ cat.categoria }}">{{ cat.categoria }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Método de Pagamento</label>
+                            <select class="form-select" name="metodo_pagamento" id="edit_metodo_pagamento" required>
+                                <option value="Conta Corrente">Conta Corrente</option>
+                                <option value="Pix">Pix</option>
+                                <option value="Dinheiro">Dinheiro</option>
+                                <option value="Cartão de Crédito">Cartão de Crédito</option>
+                            </select>
+                        </div>
+
+                        <div class="col-12" id="edit_cartao_container">
+                            <label class="form-label fw-bold small text-muted">Cartão de Crédito</label>
+                            <select class="form-select" name="cartao_id" id="edit_cartao_id">
+                                {% for c in global_cartoes %}
+                                    <option value="{{ c.id }}">{{ c.nome }} (Fecha dia {{ c.fechamento_dia }} / Vence dia {{ c.vencimento_dia }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-muted">Observação</label>
+                            <input type="text" class="form-control" name="observacao" id="edit_observacao">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer modal-footer-clean">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn-action btn-primary-action">Salvar Alterações</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

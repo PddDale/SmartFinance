@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SmartFinance &bull; Gestão Financeira Pessoal{% endblock %}</title>
+    <!-- Bootstrap 5.3 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <!-- Custom CSS (Alto Contraste Monocromático com Aceleração por GPU) -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+    <!-- NAVBAR PRINCIPAL (PRETO SÓLIDO, ALTO CONTRASTE) -->
+    <nav class="navbar navbar-expand-lg navbar-dark navbar-smart sticky-top shadow-xs">
+        <div class="container-fluid px-lg-4">
+            <a class="navbar-brand navbar-brand-smart" href="{{ url_for('index') }}">
+                <div class="brand-box">
+                    <i class="bi bi-wallet2"></i>
+                </div>
+                <span>SmartFinance</span>
+            </a>
+
+            <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div class="collapse navbar-collapse" id="navMenu">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0 ms-lg-3">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">
+                            <i class="bi bi-speedometer2 me-1"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'lancamentos' %}active{% endif %}" href="{{ url_for('lancamentos') }}">
+                            <i class="bi bi-receipt-cutoff me-1"></i> Lançamentos
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'parcelas' %}active{% endif %}" href="{{ url_for('parcelas') }}">
+                            <i class="bi bi-calendar-range me-1"></i> Compras Parceladas
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'recorrentes' %}active{% endif %}" href="{{ url_for('recorrentes') }}">
+                            <i class="bi bi-arrow-repeat me-1"></i> Recorrentes
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'cartoes' %}active{% endif %}" href="{{ url_for('cartoes') }}">
+                            <i class="bi bi-credit-card-2-front me-1"></i> Cartões
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'anual' %}active{% endif %}" href="{{ url_for('anual') }}">
+                            <i class="bi bi-graph-up-arrow me-1"></i> Visão Anual
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'configuracoes' %}active{% endif %}" href="{{ url_for('configuracoes') }}">
+                            <i class="bi bi-sliders me-1"></i> Configurações
+                        </a>
+                    </li>
+                </ul>
+
+                <!-- BOTÕES DE AÇÃO COM CORES VIVAS (ALTO CONTRASTE) -->
+                <div class="d-flex align-items-center gap-2 mt-2 mt-lg-0">
+                    <button class="btn-action btn-warning-action" data-bs-toggle="modal" data-bs-target="#modalAjustarSaldos">
+                        <i class="bi bi-piggy-bank"></i> Ajustar Saldos
+                    </button>
+                    <button class="btn-action btn-primary-action" data-bs-toggle="modal" data-bs-target="#modalNovoLancamento">
+                        <i class="bi bi-plus-circle"></i> Novo Gasto
+                    </button>
+                    <!-- Botão de Sair com Escolha de Salvar ou Não -->
+                    <button class="btn-action btn-danger-action" data-bs-toggle="modal" data-bs-target="#modalSair" title="Opções de encerramento">
+                        <i class="bi bi-power"></i> Sair
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- CABEÇALHO / CARDS DE KPIS PATRIMONIAIS (BRANCO, PRETO E CINZA) -->
+    <section class="py-3">
+        <div class="container-fluid px-lg-4">
+            <div class="row g-3">
+                <!-- Card 1: Patrimônio Total -->
+                <div class="col-12 col-sm-6 col-xl">
+                    <div class="card-kpi-clean h-100 d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="kpi-title">Patrimônio Total</div>
+                            <div class="kpi-val">{{ global_config.patrimonio_total | moeda }}</div>
+                            <div class="text-muted small mt-1">
+                                <span class="badge bg-light text-dark border">CC + Investimentos</span>
+                            </div>
+                        </div>
+                        <div class="kpi-icon-box">
+                            <i class="bi bi-bank"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 2: Saldo Conta Corrente -->
+                <div class="col-12 col-sm-6 col-xl">
+                    <div class="card-kpi-clean h-100 d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="kpi-title">Conta Corrente</div>
+                            <div class="kpi-val">{{ global_config.saldo_conta_corrente | moeda }}</div>
+                            <div class="text-muted small mt-1">
+                                <a href="javascript:void(0)" class="text-decoration-none small text-dark fw-bold" data-bs-toggle="modal" data-bs-target="#modalAjustarSaldos">
+                                    <i class="bi bi-pencil-square"></i> Atualizar
+                                </a>
+                            </div>
+                        </div>
+                        <div class="kpi-icon-box">
+                            <i class="bi bi-wallet-fill"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 3: Investimentos -->
+                <div class="col-12 col-sm-6 col-xl">
+                    <div class="card-kpi-clean h-100 d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="kpi-title">Investimentos</div>
+                            <div class="kpi-val">{{ global_config.valor_investido | moeda }}</div>
+                            <div class="text-muted small mt-1">
+                                <span class="badge bg-light text-secondary border">Aplicações</span>
+                            </div>
+                        </div>
+                        <div class="kpi-icon-box">
+                            <i class="bi bi-graph-up"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 4: Renda Mensal Cadastrada -->
+                <div class="col-12 col-sm-6 col-xl">
+                    <div class="card-kpi-clean h-100 d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="kpi-title">Renda Mensal</div>
+                            <div class="kpi-val">{{ global_config.renda_total | moeda }}</div>
+                            <div class="text-muted small mt-1">
+                                Salário + Outras Rendas
+                            </div>
+                        </div>
+                        <div class="kpi-icon-box">
+                            <i class="bi bi-cash-stack"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 5: Faturas Abertas de Cartão -->
+                <div class="col-12 col-sm-6 col-xl">
+                    <div class="card-kpi-clean h-100 d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="kpi-title">Faturas em Aberto</div>
+                            <div class="kpi-val">{{ global_total_faturas_abertas | moeda }}</div>
+                            <div class="text-muted small mt-1">
+                                <a href="{{ url_for('cartoes') }}" class="text-decoration-none small text-dark fw-bold">
+                                    {{ global_cartoes | length }} cartão(ões) <i class="bi bi-arrow-right"></i>
+                                </a>
+                            </div>
+                        </div>
+                        <div class="kpi-icon-box">
+                            <i class="bi bi-credit-card-fill"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ALERTAS E MENSAGENS FLASH -->
+    <div class="container-fluid px-lg-4 mt-2">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-secondary alert-dismissible fade show shadow-xs border d-flex align-items-center rounded-3 bg-white" role="alert">
+                        <i class="bi bi-info-circle-fill text-dark fs-5 me-2"></i>
+                        <div class="text-dark fw-semibold">{{ message }}</div>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- CONTEÚDO PRINCIPAL DA PÁGINA -->
+    <main class="flex-grow-1 pb-5">
+        <div class="container-fluid px-lg-4">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <!-- FOOTER MONOCROMÁTICO -->
+    <footer class="bg-white border-top py-3 mt-auto text-center text-muted small">
+        <div class="container-fluid px-lg-4 d-flex flex-column flex-md-row justify-content-between align-items-center gap-2">
+            <div>
+                <strong>SmartFinance</strong> &copy; {{ global_ano_atual }} &bull; Controle Financeiro Pessoal
+            </div>
+            <div class="d-flex align-items-center gap-3">
+                <span><i class="bi bi-database me-1"></i>SQLite Local</span>
+                <a href="{{ url_for('configuracoes') }}" class="text-dark fw-semibold text-decoration-none">Configurações</a>
+                <a href="{{ url_for('exportar_json') }}" class="text-dark text-decoration-none fw-bold">
+                    <i class="bi bi-download me-1"></i>Exportar JSON
+                </a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- ==================== MODAIS GLOBAIS ==================== -->
+
+    <!-- Modal: Encerrar SmartFinance (Opções: Salvar e Sair OU Sair sem Salvar) -->
+    <div class="modal fade" id="modalSair" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content modal-content-clean">
+                <div class="modal-header modal-header-clean">
+                    <h5 class="modal-title fw-bold text-dark">
+                        <i class="bi bi-power me-2"></i>Encerrar SmartFinance
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4" id="modalSairBody">
+                    <div class="d-flex align-items-center gap-3 mb-3">
+                        <div class="kpi-icon-box" style="width: 52px; height: 52px; font-size: 1.6rem;">
+                            <i class="bi bi-door-closed"></i>
+                        </div>
+                        <div>
+                            <h5 class="fw-bold text-dark mb-1">Como você deseja encerrar?</h5>
+                            <p class="text-muted small mb-0">Você pode salvar todas as pendências no banco de dados local ou sair imediatamente sem aplicar alterações não salvas.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer modal-footer-clean d-flex justify-content-between" id="modalSairFooter">
+                    <button type="button" class="btn-action btn-neutral-action" data-bs-dismiss="modal">
+                        Cancelar
+                    </button>
+                    <div class="d-flex gap-2">
+                        <!-- Botão Sair Sem Salvar -->
+                        <button type="button" class="btn-action btn-danger-action" id="btnSairSemSalvar">
+                            <i class="bi bi-x-circle"></i> Sair sem Salvar
+                        </button>
+                        <!-- Botão Salvar e Sair -->
+                        <button type="button" class="btn-action btn-success-action" id="btnConfirmarSair">
+                            <i class="bi bi-check2-circle"></i> Salvar e Sair
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 1: Novo Lançamento Rápido -->
+    <div class="modal fade" id="modalNovoLancamento" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content modal-content-clean">
+                <div class="modal-header modal-header-clean">
+                    <h5 class="modal-title fw-bold text-dark">
+                        <i class="bi bi-plus-circle text-primary me-2"></i>Novo Lançamento Diário
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('novo_lancamento') }}" method="POST">
+                    <div class="modal-body p-4">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Data do Gasto</label>
+                                <input type="date" class="form-control" name="data" id="modal_data_lancamento" value="{{ global_hoje }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Valor (R$)</label>
+                                <input type="number" step="0.01" min="0.01" class="form-control fw-bold" name="valor" placeholder="0,00" required>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-bold small text-muted">Descrição</label>
+                                <input type="text" class="form-control" name="descricao"
+                                       id="modal_descricao"
+                                       placeholder="Ex: Supermercado, Almoço, Gasolina..."
+                                       required autocomplete="off"
+                                       data-cat-target="modal_categoria">
+                                <div class="auto-cat-hint text-muted" id="modal_cat_hint"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Categoria</label>
+                                <select class="form-select" name="categoria" id="modal_categoria" required>
+                                    {% for cat in global_categorias %}
+                                        <option value="{{ cat.categoria }}">{{ cat.categoria }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Método de Pagamento</label>
+                                <select class="form-select" name="metodo_pagamento" id="modal_metodo_pagamento" required>
+                                    <option value="Conta Corrente">Conta Corrente</option>
+                                    <option value="Pix">Pix</option>
+                                    <option value="Dinheiro">Dinheiro</option>
+                                    <option value="Cartão de Crédito" selected>Cartão de Crédito</option>
+                                </select>
+                            </div>
+
+                            <!-- Seleção do Cartão (Condicional) -->
+                            <div class="col-12" id="modal_cartao_container">
+                                <label class="form-label fw-bold small text-muted">Escolha o Cartão de Crédito</label>
+                                <select class="form-select" name="cartao_id" id="modal_cartao_id">
+                                    {% for c in global_cartoes %}
+                                        <option value="{{ c.id }}">{{ c.nome }} (Fecha dia {{ c.fechamento_dia }} / Vence dia {{ c.vencimento_dia }})</option>
+                                    {% endfor %}
+                                </select>
+                                <div id="modal_fatura_preview" class="d-none"></div>
+                            </div>
+
+                            <div class="col-12">
+                                <label class="form-label fw-bold small text-muted">Observação (Opcional)</label>
+                                <input type="text" class="form-control" name="observacao" placeholder="Detalhes adicionais...">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer modal-footer-clean">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn-action btn-primary-action">Salvar Lançamento</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 2: Ajustar Saldos de Patrimônio -->
+    <div class="modal fade" id="modalAjustarSaldos" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content modal-content-clean">
+                <div class="modal-header modal-header-clean">
+                    <h5 class="modal-title fw-bold text-dark">
+                        <i class="bi bi-wallet2 me-2"></i>Ajustar Saldos de Patrimônio
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('salvar_saldos_rapido') }}" method="POST">
+                    <div class="modal-body p-4">
+                        <p class="text-muted small mb-3">Atualize o saldo disponível na sua conta corrente e o valor total alocado em investimentos.</p>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold small text-muted">Saldo em Conta Corrente (R$)</label>
+                            <input type="number" step="0.01" class="form-control form-control-lg fw-bold" name="saldo_conta_corrente" value="{{ global_config.saldo_conta_corrente }}" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold small text-muted">Valor Total Investido (R$)</label>
+                            <input type="number" step="0.01" class="form-control form-control-lg fw-bold" name="valor_investido" value="{{ global_config.valor_investido }}" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer modal-footer-clean">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Fechar</button>
+                        <button type="submit" class="btn-action btn-success-action">Atualizar Patrimônio</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 3: Nova Compra Parcelada -->
+    <div class="modal fade" id="modalNovaParcela" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content modal-content-clean">
+                <div class="modal-header modal-header-clean">
+                    <h5 class="modal-title fw-bold text-dark">
+                        <i class="bi bi-calendar-range me-2"></i>Nova Compra Parcelada
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('nova_compra_parcelada') }}" method="POST">
+                    <div class="modal-body p-4">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label fw-bold small text-muted">Descrição da Compra</label>
+                                <input type="text" class="form-control" name="descricao" placeholder="Ex: Notebook, Celular, Passagens..." required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Data da Compra</label>
+                                <input type="date" class="form-control" name="data_compra" id="parc_data_compra" value="{{ global_hoje }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Categoria</label>
+                                <select class="form-select" name="categoria" required>
+                                    {% for cat in global_categorias %}
+                                        <option value="{{ cat.categoria }}">{{ cat.categoria }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold small text-muted">Valor Total (R$)</label>
+                                <input type="number" step="0.01" min="0.01" class="form-control fw-bold" name="valor_total" id="parc_valor_total" placeholder="0,00" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold small text-muted">Entrada (R$)</label>
+                                <input type="number" step="0.01" min="0" class="form-control" name="entrada" id="parc_entrada" value="0.00">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold small text-muted">Nº de Parcelas</label>
+                                <input type="number" min="1" max="72" class="form-control fw-bold text-center" name="num_parcelas" id="parc_num_parcelas" value="10" required>
+                            </div>
+
+                            <div class="col-12" id="parc_preview"></div>
+
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Método de Pagamento</label>
+                                <select class="form-select" name="metodo_pagamento" id="parc_metodo_pagamento" required>
+                                    <option value="Cartão de Crédito" selected>Cartão de Crédito</option>
+                                    <option value="Boleto / Carnê">Boleto / Carnê</option>
+                                    <option value="Outro">Outro</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6" id="parc_cartao_container">
+                                <label class="form-label fw-bold small text-muted">Cartão de Crédito</label>
+                                <select class="form-select" name="cartao_id" id="parc_cartao_id">
+                                    {% for c in global_cartoes %}
+                                        <option value="{{ c.id }}">{{ c.nome }} (Fecha dia {{ c.fechamento_dia }})</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <div class="col-12">
+                                <label class="form-label fw-bold small text-muted">Observação (Opcional)</label>
+                                <input type="text" class="form-control" name="observacao" placeholder="Ex: Loja X, garantia estendida...">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer modal-footer-clean">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn-action btn-primary-action">Salvar e Projetar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 4: Novo Cartão de Crédito -->
+    <div class="modal fade" id="modalNovoCartao" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content modal-content-clean">
+                <div class="modal-header modal-header-clean">
+                    <h5 class="modal-title fw-bold text-dark">
+                        <i class="bi bi-credit-card-2-front me-2"></i>Cadastrar Novo Cartão
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('novo_cartao') }}" method="POST">
+                    <div class="modal-body p-4">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label fw-bold small text-muted">Nome / Identificação do Cartão</label>
+                                <input type="text" class="form-control" name="nome" placeholder="Ex: Nubank Roxinho, XP Infinite..." required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Limite Total (R$)</label>
+                                <input type="number" step="0.01" min="1" class="form-control fw-bold" name="limite_total" placeholder="5000,00" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Bandeira</label>
+                                <select class="form-select" name="bandeira">
+                                    <option value="Mastercard">Mastercard</option>
+                                    <option value="Visa">Visa</option>
+                                    <option value="Elo">Elo</option>
+                                    <option value="American Express">American Express</option>
+                                    <option value="Outra">Outra</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Dia de Fechamento da Fatura</label>
+                                <input type="number" min="1" max="31" class="form-control" name="fechamento_dia" value="25" required>
+                                <div class="form-text small">Compras a partir deste dia entram no mês seguinte.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Dia de Vencimento da Fatura</label>
+                                <input type="number" min="1" max="31" class="form-control" name="vencimento_dia" value="5" required>
+                                <div class="form-text small">Dia do pagamento do boleto.</div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-bold small text-muted">Cor do Cartão (Para a Interface)</label>
+                                <input type="color" class="form-control form-control-color w-100" name="cor" value="#1e293b" title="Escolha a cor do cartão">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer modal-footer-clean">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn-action btn-primary-action">Cadastrar Cartão</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5.3 Bundle JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Custom App JS -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

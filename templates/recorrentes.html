@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}SmartFinance &bull; Gastos Recorrentes{% endblock %}
+
+{% block content %}
+<div class="pt-3">
+
+    <!-- CABEÇALHO DA PÁGINA -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-bold text-dark mb-0">Gastos Recorrentes e Assinaturas</h1>
+            <p class="text-muted small mb-0">Contas fixas mensais (Aluguel, Condomínio, Internet) e assinaturas com controle de pausa mensal.</p>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <!-- Seletor do mês para verificação do status de ativação -->
+            <form method="GET" action="{{ url_for('recorrentes') }}" class="d-flex align-items-center gap-2">
+                <span class="small text-muted fw-bold">Mês de Análise:</span>
+                <input type="month" name="mes" value="{{ ano_mes }}" class="form-control form-control-sm" onchange="this.form.submit()">
+            </form>
+
+            <button class="btn-action btn-primary-action" data-bs-toggle="modal" data-bs-target="#modalNovoRecorrente">
+                <i class="bi bi-plus-circle"></i> Nova Conta Recorrente
+            </button>
+        </div>
+    </div>
+
+    <!-- BANNER DE RESUMO (MONOCROMÁTICO) -->
+    <div class="card card-clean p-3 mb-4 border-start border-4 border-dark">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+            <div class="d-flex align-items-center gap-3">
+                <div class="kpi-icon-box" style="width: 48px; height: 48px; font-size: 1.4rem;">
+                    <i class="bi bi-arrow-repeat"></i>
+                </div>
+                <div>
+                    <span class="text-muted small fw-bold text-uppercase">Total Recorrente Ativo em {{ ano_mes | data_br }}</span>
+                    <h2 class="fw-bold text-dark mb-0">{{ total_mensal_ativo | moeda }}</h2>
+                    <small class="text-muted">Impacto fixo garantido no orçamento deste mês</small>
+                </div>
+            </div>
+            <div class="text-md-end text-muted small">
+                <i class="bi bi-info-circle me-1"></i>Você pode <strong>pausar</strong> uma assinatura para um mês específico sem precisar excluí-la!
+            </div>
+        </div>
+    </div>
+
+    <!-- TABELA DE GASTOS RECORRENTES -->
+    <div class="card card-clean overflow-hidden mb-4">
+        <div class="table-responsive">
+            <table class="table table-custom mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 80px;" class="text-center">Dia</th>
+                        <th>Descrição da Assinatura / Conta Fixa</th>
+                        <th>Categoria</th>
+                        <th>Método / Cartão</th>
+                        <th>Valor Mensal</th>
+                        <th class="text-center" style="width: 170px;">Cobrança em {{ ano_mes | data_br }}</th>
+                        <th class="text-center" style="width: 100px;">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in recorrentes %}
+                    <tr id="recorrente-row-{{ r.id }}" class="{% if r.status_mes != 1 %}opacity-50 table-light{% endif %}">
+                        <td class="text-center fw-bold text-muted">
+                            <span class="badge bg-light text-dark border">Dia {{ r.dia_cobranca }}</span>
+                        </td>
+                        <td>
+                            <span class="fw-bold text-dark">{{ r.descricao }}</span>
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border">{{ r.categoria }}</span>
+                        </td>
+                        <td>
+                            {% if r.cartao_nome %}
+                                <span class="badge bg-dark text-white">
+                                    <i class="bi bi-credit-card me-1"></i>{{ r.cartao_nome }}
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-dark border">
+                                    {{ r.metodo_pagamento }}
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="fw-bold text-dark fs-6">
+                            {{ r.valor_mensal | moeda }}
+                        </td>
+                        <td class="text-center">
+                            <!-- Toggle switch AJAX para ativar/pausar no mês -->
+                            <div class="form-check form-switch d-inline-block">
+                                <input class="form-check-input toggle-recorrente-mes"
+                                       type="checkbox"
+                                       role="switch"
+                                       id="switch-rec-{{ r.id }}"
+                                       data-id="{{ r.id }}"
+                                       data-mes="{{ ano_mes }}"
+                                       {% if r.status_mes == 1 %}checked{% endif %}>
+                                <label class="form-check-label small fw-bold" for="switch-rec-{{ r.id }}">
+                                    {% if r.status_mes == 1 %}Ativo{% else %}Pausado{% endif %}
+                                </label>
+                            </div>
+                        </td>
+                        <td class="text-center">
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-dark btn-sm rounded-start-pill"
+                                        title="Editar Recorrente"
+                                        onclick="preencherModalEdicaoRecorrente(
+                                            '{{ r.id }}',
+                                            '{{ r.descricao | escape }}',
+                                            '{{ r.valor_mensal }}',
+                                            '{{ r.categoria }}',
+                                            '{{ r.dia_cobranca }}',
+                                            '{{ r.metodo_pagamento }}',
+                                            '{{ r.cartao_id or '' }}'
+                                        )">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <form action="{{ url_for('excluir_recorrente', id=r.id) }}" method="POST" onsubmit="return confirm('Deseja excluir este gasto recorrente?');" class="d-inline">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm rounded-end-pill" title="Excluir">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5 text-muted">
+                            Nenhum gasto recorrente cadastrado ainda.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- MODAL NOVO GASTO RECORRENTE -->
+<div class="modal fade" id="modalNovoRecorrente" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content modal-content-clean">
+            <div class="modal-header modal-header-clean">
+                <h5 class="modal-title fw-bold text-dark">
+                    <i class="bi bi-arrow-repeat me-2"></i>Novo Gasto Recorrente
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('novo_recorrente') }}" method="POST">
+                <div class="modal-body p-4">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-muted">Descrição</label>
+                            <input type="text" class="form-control" name="descricao" placeholder="Ex: Netflix, Aluguel, Internet..." required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Valor Mensal (R$)</label>
+                            <input type="number" step="0.01" min="0.01" class="form-control fw-bold" name="valor_mensal" placeholder="0,00" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Dia da Cobrança</label>
+                            <input type="number" min="1" max="31" class="form-control" name="dia_cobranca" value="5" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Categoria</label>
+                            <select class="form-select" name="categoria" required>
+                                {% for cat in global_categorias %}
+                                    <option value="{{ cat.categoria }}">{{ cat.categoria }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Método de Pagamento</label>
+                            <select class="form-select" name="metodo_pagamento" id="rec_metodo_novo" required>
+                                <option value="Conta Corrente">Conta Corrente / Débito</option>
+                                <option value="Pix">Pix / Boleto</option>
+                                <option value="Cartão de Crédito">Cartão de Crédito</option>
+                            </select>
+                        </div>
+                        <div class="col-12" id="rec_cartao_novo_container">
+                            <label class="form-label fw-bold small text-muted">Cartão de Crédito (se aplicável)</label>
+                            <select class="form-select" name="cartao_id">
+                                <option value="">Nenhum cartão</option>
+                                {% for c in global_cartoes %}
+                                    <option value="{{ c.id }}">{{ c.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer modal-footer-clean">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn-action btn-primary-action">Cadastrar Recorrente</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL EDITAR GASTO RECORRENTE -->
+<div class="modal fade" id="modalEditarRecorrente" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content modal-content-clean">
+            <div class="modal-header modal-header-clean">
+                <h5 class="modal-title fw-bold text-dark">
+                    <i class="bi bi-pencil-square me-2"></i>Editar Gasto Recorrente
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="formEditarRecorrente" method="POST">
+                <div class="modal-body p-4">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-muted">Descrição</label>
+                            <input type="text" class="form-control" name="descricao" id="edit_rec_descricao" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Valor Mensal (R$)</label>
+                            <input type="number" step="0.01" min="0.01" class="form-control fw-bold" name="valor_mensal" id="edit_rec_valor" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Dia da Cobrança</label>
+                            <input type="number" min="1" max="31" class="form-control" name="dia_cobranca" id="edit_rec_dia" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Categoria</label>
+                            <select class="form-select" name="categoria" id="edit_rec_categoria" required>
+                                {% for cat in global_categorias %}
+                                    <option value="{{ cat.categoria }}">{{ cat.categoria }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Método de Pagamento</label>
+                            <select class="form-select" name="metodo_pagamento" id="edit_rec_metodo" required>
+                                <option value="Conta Corrente">Conta Corrente / Débito</option>
+                                <option value="Pix">Pix / Boleto</option>
+                                <option value="Cartão de Crédito">Cartão de Crédito</option>
+                            </select>
+                        </div>
+                        <div class="col-12" id="edit_rec_cartao_container">
+                            <label class="form-label fw-bold small text-muted">Cartão de Crédito (se aplicável)</label>
+                            <select class="form-select" name="cartao_id" id="edit_rec_cartao_id">
+                                <option value="">Nenhum cartão</option>
+                                {% for c in global_cartoes %}
+                                    <option value="{{ c.id }}">{{ c.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer modal-footer-clean">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn-action btn-primary-action">Salvar Alterações</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

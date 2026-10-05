@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+
+{% block title %}SmartFinance &bull; Cartões de Crédito{% endblock %}
+
+{% block content %}
+<div class="pt-3">
+
+    <!-- CABEÇALHO DA PÁGINA -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-bold text-dark mb-0">Gestão de Cartões de Crédito</h1>
+            <p class="text-muted small mb-0">Monitore limites disponíveis, faturas abertas e datas de fechamento e vencimento de cada cartão.</p>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn-action btn-primary-action" data-bs-toggle="modal" data-bs-target="#modalNovoCartao">
+                <i class="bi bi-credit-card-2-front"></i> Novo Cartão
+            </button>
+        </div>
+    </div>
+
+    <!-- CARDS DE KPIS GLOBAIS DE CARTÃO (MONOCROMÁTICOS) -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-md-4">
+            <div class="card card-clean p-3">
+                <span class="text-muted small fw-bold text-uppercase">Limite Total de Crédito</span>
+                <h3 class="fw-bold text-dark mt-1 mb-0">{{ total_limite_global | moeda }}</h3>
+                <small class="text-muted">Soma de todos os seus cartões</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <div class="card card-clean p-3">
+                <span class="text-muted small fw-bold text-uppercase">Limite Disponível Global</span>
+                <h3 class="fw-bold text-dark mt-1 mb-0">{{ total_disponivel_global | moeda }}</h3>
+                <small class="text-muted">Crédito livre para compras</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <div class="card card-clean p-3">
+                <span class="text-muted small fw-bold text-uppercase">Limite Comprometido</span>
+                <h3 class="fw-bold text-dark mt-1 mb-0">{{ total_comprometido_global | moeda }}</h3>
+                <small class="text-muted">Faturas atuais + parcelas futuras</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- GRADE VISUAL DOS CARTÕES DE CRÉDITO (DESIGN MANTIDO CONFORME PREFERÊNCIA) -->
+    <div class="row g-4 mb-5">
+        {% for c in cartoes %}
+        <div class="col-12 col-lg-6 col-xl-4">
+            <div class="credit-card-ui" style="background-color: {{ c.cor }};">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="credit-card-chip mb-2"></div>
+                        <h4 class="fw-bold text-white mb-0">{{ c.nome }}</h4>
+                        <small class="text-white-50">{{ c.bandeira }}</small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge bg-white text-dark fw-bold rounded-pill px-2 py-1 small">
+                            Fecha Dia {{ c.fechamento_dia }}
+                        </span>
+                        <div class="small text-white-50 mt-1">Vence Dia {{ c.vencimento_dia }}</div>
+                    </div>
+                </div>
+
+                <!-- Detalhes do Limite no Cartão -->
+                <div class="mt-4">
+                    <div class="d-flex justify-content-between text-white-50 small mb-1">
+                        <span>Limite Utilizado</span>
+                        <span class="fw-bold text-white">{{ c.limite_comprometido | moeda }} / {{ c.limite_total | moeda }}</span>
+                    </div>
+                    <div class="progress-clean bg-dark" style="height: 7px;">
+                        <div class="progress-bar bg-white"
+                             style="width: {{ [c.percentual_uso, 100] | min }}%;"></div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <small class="text-white-50">Disponível: <strong class="text-white">{{ c.limite_disponivel | moeda }}</strong></small>
+                        <span class="badge bg-black bg-opacity-25 text-white">{{ c.percentual_uso }}% em uso</span>
+                    </div>
+                </div>
+
+                <!-- Rodapé do Cartão: Próximas Datas e Ações -->
+                <div class="d-flex justify-content-between align-items-center pt-3 border-top border-white border-opacity-10 mt-3">
+                    <div class="small text-white-50">
+                        Fatura Aberta: <strong class="text-white fs-6">{{ c.fatura_aberta | moeda }}</strong>
+                    </div>
+
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-light btn-sm rounded-pill px-2"
+                                title="Editar Cartão"
+                                onclick="preencherModalEdicaoCartao(
+                                    '{{ c.id }}',
+                                    '{{ c.nome | escape }}',
+                                    '{{ c.limite_total }}',
+                                    '{{ c.fechamento_dia }}',
+                                    '{{ c.vencimento_dia }}',
+                                    '{{ c.cor }}',
+                                    '{{ c.bandeira }}'
+                                )">
+                            <i class="bi bi-pencil me-1"></i>Editar
+                        </button>
+                        <form action="{{ url_for('excluir_cartao', id=c.id) }}" method="POST" onsubmit="return confirm('Tem certeza que deseja excluir este cartão?');" class="d-inline ms-1">
+                            <button type="submit" class="btn btn-outline-light btn-sm rounded-pill" title="Excluir Cartão">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- DETALHAMENTO DE FATURAS POR CARTÃO NO MÊS SELECIONADO -->
+    <div class="card card-clean mb-4 overflow-hidden">
+        <div class="card-header bg-white border-bottom py-3 px-4 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+            <div>
+                <h5 class="fw-bold mb-0 text-dark">
+                    <i class="bi bi-receipt me-2"></i>Detalhamento da Fatura dos Cartões
+                </h5>
+                <small class="text-muted">Veja exatamente o que compõe a fatura deste mês em cada cartão.</small>
+            </div>
+
+            <!-- Seletor do Mês da Fatura -->
+            <form method="GET" action="{{ url_for('cartoes') }}" class="d-flex align-items-center gap-2">
+                <span class="small text-muted fw-bold">Fatura com Vencimento em:</span>
+                <input type="month" name="mes" value="{{ ano_mes }}" class="form-control form-control-sm" onchange="this.form.submit()">
+            </form>
+        </div>
+
+        <div class="p-4">
+            <div class="accordion" id="accordionFaturas">
+                {% for c in cartoes %}
+                <div class="accordion-item border rounded-3 mb-3 overflow-hidden shadow-xs">
+                    <h2 class="accordion-header" id="heading-{{ c.id }}">
+                        <button class="accordion-button {% if not loop.first %}collapsed{% endif %} bg-light" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-{{ c.id }}">
+                            <div class="d-flex justify-content-between align-items-center w-100 me-3">
+                                <div class="d-flex align-items-center gap-2">
+                                    <div style="width: 12px; height: 12px; border-radius: 50%; background-color: {{ c.cor }};"></div>
+                                    <span class="fw-bold text-dark">{{ c.nome }}</span>
+                                    <span class="badge bg-light text-dark border small">Vence dia {{ c.vencimento_dia }}</span>
+                                </div>
+                                <div>
+                                    <span class="text-muted small me-2">Total desta Fatura:</span>
+                                    <span class="fw-bold text-dark fs-6">{{ c.total_fatura_mes | moeda }}</span>
+                                </div>
+                            </div>
+                        </button>
+                    </h2>
+                    <div id="collapse-{{ c.id }}" class="accordion-collapse collapse {% if loop.first %}show{% endif %}" data-bs-parent="#accordionFaturas">
+                        <div class="accordion-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Data Compra</th>
+                                            <th>Descrição</th>
+                                            <th>Tipo</th>
+                                            <th>Categoria</th>
+                                            <th class="text-end">Valor (R$)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Itens Avulsos -->
+                                        {% for a in c.itens_avulsos %}
+                                        <tr>
+                                            <td class="text-muted small">{{ a.data | data_br }}</td>
+                                            <td class="fw-semibold text-dark">{{ a.descricao }}</td>
+                                            <td><span class="badge bg-light text-dark border">Avulso</span></td>
+                                            <td><span class="badge bg-light text-dark border">{{ a.categoria }}</span></td>
+                                            <td class="text-end fw-bold text-dark">{{ a.valor | moeda }}</td>
+                                        </tr>
+                                        {% endfor %}
+
+                                        <!-- Parcelas -->
+                                        {% for p in c.itens_parcelas %}
+                                        <tr>
+                                            <td class="text-muted small">{{ p.data_vencimento | data_br }}</td>
+                                            <td class="fw-semibold text-dark">
+                                                {{ p.compra_descricao }} <span class="badge bg-light text-dark border">Parc {{ p.numero_parcela }}/{{ p.total_parcelas }}</span>
+                                            </td>
+                                            <td><span class="badge bg-light text-dark border">Parcelamento</span></td>
+                                            <td>-</td>
+                                            <td class="text-end fw-bold text-dark">{{ p.valor | moeda }}</td>
+                                        </tr>
+                                        {% endfor %}
+
+                                        <!-- Recorrentes -->
+                                        {% for r in c.itens_recorrentes %}
+                                        <tr>
+                                            <td class="text-muted small">Dia {{ r.dia_cobranca }}</td>
+                                            <td class="fw-semibold text-dark">{{ r.descricao }}</td>
+                                            <td><span class="badge bg-light text-dark border">Assinatura</span></td>
+                                            <td><span class="badge bg-light text-dark border">{{ r.categoria }}</span></td>
+                                            <td class="text-end fw-bold text-dark">{{ r.valor_mensal | moeda }}</td>
+                                        </tr>
+                                        {% endfor %}
+
+                                        {% if (c.itens_avulsos | length == 0) and (c.itens_parcelas | length == 0) and (c.itens_recorrentes | length == 0) %}
+                                        <tr>
+                                            <td colspan="5" class="text-center py-3 text-muted">
+                                                Nenhum gasto alocado na fatura de {{ ano_mes | data_br }} deste cartão.
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- MODAL EDITAR CARTÃO -->
+<div class="modal fade" id="modalEditarCartao" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content modal-content-clean">
+            <div class="modal-header modal-header-clean">
+                <h5 class="modal-title fw-bold text-dark">
+                    <i class="bi bi-pencil-square me-2"></i>Editar Cartão de Crédito
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="formEditarCartao" method="POST">
+                <div class="modal-body p-4">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-muted">Nome / Identificação</label>
+                            <input type="text" class="form-control" name="nome" id="edit_cartao_nome" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Limite Total (R$)</label>
+                            <input type="number" step="0.01" min="1" class="form-control fw-bold" name="limite_total" id="edit_cartao_limite" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Bandeira</label>
+                            <select class="form-select" name="bandeira" id="edit_cartao_bandeira">
+                                <option value="Mastercard">Mastercard</option>
+                                <option value="Visa">Visa</option>
+                                <option value="Elo">Elo</option>
+                                <option value="American Express">American Express</option>
+                                <option value="Outra">Outra</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Dia de Fechamento</label>
+                            <input type="number" min="1" max="31" class="form-control" name="fechamento_dia" id="edit_cartao_fechamento" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Dia de Vencimento</label>
+                            <input type="number" min="1" max="31" class="form-control" name="vencimento_dia" id="edit_cartao_vencimento" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-muted">Cor do Cartão</label>
+                            <input type="color" class="form-control form-control-color w-100" name="cor" id="edit_cartao_cor">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer modal-footer-clean">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn-action btn-primary-action">Salvar Alterações</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

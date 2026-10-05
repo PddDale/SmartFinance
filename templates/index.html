@@ -1,0 +1,489 @@
+{% extends "base.html" %}
+
+{% block title %}SmartFinance &bull; Dashboard {{ resumo.nome_mes_extenso }}{% endblock %}
+
+{% block content %}
+<div class="pt-3">
+
+    <!-- BARRA SUPERIOR DO DASHBOARD: SELETOR DE MÊS E BOTÕES -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-bold text-dark mb-0">Resumo Financeiro</h1>
+            <p class="text-muted small mb-0">Acompanhamento do orçamento mensal, limites de gastos e projeções.</p>
+        </div>
+
+        <!-- Seletor de Mês/Ano Monocromático -->
+        <div class="d-flex align-items-center gap-2">
+            <div class="month-selector-clean">
+                <a href="{{ url_for('index', mes=mes_ant) }}" class="btn-month-nav" title="Mês Anterior">
+                    <i class="bi bi-chevron-left"></i>
+                </a>
+                <span class="month-label">
+                    <i class="bi bi-calendar3 me-1 text-muted"></i> {{ resumo.nome_mes_extenso }}
+                </span>
+                <a href="{{ url_for('index', mes=mes_prox) }}" class="btn-month-nav" title="Próximo Mês">
+                    <i class="bi bi-chevron-right"></i>
+                </a>
+            </div>
+
+            {% if ano_mes != global_mes_atual %}
+                <a href="{{ url_for('index', mes=global_mes_atual) }}" class="btn btn-outline-dark btn-sm rounded-pill px-3" title="Voltar para o Mês Atual">
+                    Mês Atual
+                </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- CARDS DE RESUMO DO MÊS SELECIONADO (MONOCROMÁTICOS) -->
+    <div class="row g-3 mb-4">
+        <!-- Renda Total do Mês -->
+        <div class="col-12 col-sm-6 col-lg-3">
+            <div class="card card-clean p-3 h-100">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-muted small fw-bold text-uppercase">Renda do Mês</span>
+                        <h3 class="fw-bold text-dark mt-1 mb-0">{{ resumo.renda_total | moeda }}</h3>
+                    </div>
+                    <div class="kpi-icon-box">
+                        <i class="bi bi-arrow-up-circle"></i>
+                    </div>
+                </div>
+                <div class="mt-2 text-muted small">
+                    Salário ({{ config.salario | moeda }}) + Outras ({{ config.outras_rendas | moeda }})
+                </div>
+            </div>
+        </div>
+
+        <!-- Total de Gastos do Mês -->
+        <div class="col-12 col-sm-6 col-lg-3">
+            <div class="card card-clean p-3 h-100">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-muted small fw-bold text-uppercase">Gastos do Mês</span>
+                        <h3 class="fw-bold text-dark mt-1 mb-0">{{ resumo.total_gastos | moeda }}</h3>
+                    </div>
+                    <div class="kpi-icon-box">
+                        <i class="bi bi-arrow-down-circle"></i>
+                    </div>
+                </div>
+                <div class="mt-2 text-muted small">
+                    Avulsos + Parcelas + Recorrentes
+                </div>
+            </div>
+        </div>
+
+        <!-- Saldo Líquido do Mês -->
+        <div class="col-12 col-sm-6 col-lg-3">
+            <div class="card card-clean p-3 h-100">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-muted small fw-bold text-uppercase">Saldo Líquido</span>
+                        <h3 class="fw-bold text-dark mt-1 mb-0">
+                            {{ resumo.saldo_liquido | moeda }}
+                        </h3>
+                    </div>
+                    <div class="kpi-icon-box">
+                        <i class="bi {% if resumo.saldo_liquido >= 0 %}bi-piggy-bank{% else %}bi-exclamation-octagon{% endif %}"></i>
+                    </div>
+                </div>
+                <div class="mt-2 small">
+                    {% if resumo.saldo_liquido >= 0 %}
+                        <span class="text-dark fw-bold"><i class="bi bi-check2"></i> Superávit mensal</span>
+                    {% else %}
+                        <span class="text-muted fw-bold"><i class="bi bi-exclamation-triangle"></i> Déficit no mês</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- % do Limite Utilizado -->
+        <div class="col-12 col-sm-6 col-lg-3">
+            <div class="card card-clean p-3 h-100">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-muted small fw-bold text-uppercase">% Limite Utilizado</span>
+                        <h3 class="fw-bold text-dark mt-1 mb-0">
+                            {{ resumo.percentual_limite }}%
+                        </h3>
+                    </div>
+                    <div class="kpi-icon-box">
+                        <i class="bi bi-pie-chart"></i>
+                    </div>
+                </div>
+                <!-- Barra de progresso limpa -->
+                <div class="progress-clean mt-3">
+                    <div class="progress-bar" style="width: {{ [resumo.percentual_limite, 100] | min }}%;"></div>
+                </div>
+                <div class="text-muted small mt-1">
+                    Limite Total: {{ resumo.limite_total_estipulado | moeda }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEÇÃO DE GRÁFICOS INTERATIVOS (GPU OTIMIZADA) -->
+    <div class="row g-3 mb-4">
+        <!-- Gráfico de Rosca: Gastos por Categoria -->
+        <div class="col-12 col-lg-5">
+            <div class="card card-clean h-100">
+                <div class="card-header bg-white border-0 pt-3 px-4 pb-0 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0 text-dark">
+                        <i class="bi bi-pie-chart-fill me-2"></i>Distribuição por Categoria
+                    </h5>
+                    <span class="badge bg-light text-secondary border">Mês Atual</span>
+                </div>
+                <div class="card-body p-4 d-flex align-items-center justify-content-center" style="min-height: 280px;">
+                    {% if resumo.grafico_categorias.valores | length > 0 %}
+                        <div style="position: relative; width: 100%; max-height: 260px;">
+                            <canvas id="chartCategorias"></canvas>
+                        </div>
+                    {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                            Nenhum gasto registrado neste mês ainda.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Gráfico de Barras: Orçamento vs Realizado -->
+        <div class="col-12 col-lg-7">
+            <div class="card card-clean h-100">
+                <div class="card-header bg-white border-0 pt-3 px-4 pb-0 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0 text-dark">
+                        <i class="bi bi-bar-chart-fill me-2"></i>Orçado vs. Realizado por Categoria
+                    </h5>
+                    <span class="badge bg-light text-secondary border">Comparativo</span>
+                </div>
+                <div class="card-body p-4">
+                    <div style="position: relative; width: 100%; height: 260px;">
+                        <canvas id="chartComparativo"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEÇÃO: PROGRESSO POR CATEGORIA E DETALHAMENTO DE FATURAS -->
+    <div class="row g-3 mb-4">
+        <!-- Tabela de Progresso por Categoria -->
+        <div class="col-12 col-xl-8">
+            <div class="card card-clean h-100 overflow-hidden">
+                <div class="card-header bg-white border-bottom py-3 px-4 d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="fw-bold mb-0 text-dark">
+                            <i class="bi bi-list-check me-2"></i>Progresso dos Limites por Categoria
+                        </h5>
+                        <small class="text-muted">Acompanhe o valor gasto e o saldo disponível em cada categoria.</small>
+                    </div>
+                    <a href="{{ url_for('configuracoes') }}" class="btn-action btn-primary-action text-decoration-none">
+                        <i class="bi bi-gear"></i> Ajustar Limites
+                    </a>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-custom mb-0">
+                        <thead>
+                            <tr>
+                                <th>Categoria</th>
+                                <th>Gasto Total</th>
+                                <th>Limite Mensal</th>
+                                <th style="width: 25%;">Progresso / Uso</th>
+                                <th>Saldo Restante</th>
+                                <th class="text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cat in resumo.categorias %}
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #0f172a;"></div>
+                                        <i class="bi {{ cat.icone }} text-muted"></i>
+                                        <span class="fw-bold text-dark">{{ cat.categoria }}</span>
+                                    </div>
+                                </td>
+                                <td class="fw-bold text-dark">{{ cat.gasto_total | moeda }}</td>
+                                <td class="text-muted">{{ cat.limite | moeda }}</td>
+                                <td>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="progress-clean flex-grow-1">
+                                            <div class="progress-bar" style="width: {{ [cat.percentual, 100] | min }}%;"></div>
+                                        </div>
+                                        <small class="fw-bold text-muted" style="min-width: 45px;">{{ cat.percentual }}%</small>
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if cat.restante >= 0 %}
+                                        <span class="text-dark fw-bold">{{ cat.restante | moeda }}</span>
+                                    {% else %}
+                                        <span class="text-muted fw-bold">-{{ (cat.restante * -1) | moeda }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-light text-dark border">
+                                        {% if cat.status == 'estourado' %}
+                                            Estourado
+                                        {% elif cat.status == 'alerta' %}
+                                            Atenção
+                                        {% else %}
+                                            OK
+                                        {% endif %}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Faturas de Cartão no Mês & Composição dos Gastos -->
+        <div class="col-12 col-xl-4">
+            <div class="d-flex flex-column gap-3">
+                <!-- Faturas deste Mês -->
+                <div class="card card-clean">
+                    <div class="card-header bg-white border-bottom py-3 px-3 d-flex justify-content-between align-items-center">
+                        <h6 class="fw-bold mb-0 text-dark">
+                            <i class="bi bi-credit-card-2-front me-2"></i>Faturas de Cartão neste Mês
+                        </h6>
+                        <a href="{{ url_for('cartoes') }}" class="btn-action btn-primary-action text-decoration-none py-1 px-3 small">Ver cartões</a>
+                    </div>
+                    <div class="card-body p-3">
+                        {% if resumo.faturas_cartoes | length > 0 %}
+                            <div class="list-group list-group-flush">
+                                {% for fat in resumo.faturas_cartoes %}
+                                <div class="list-group-item px-0 py-2 border-0 bg-transparent d-flex justify-content-between align-items-center">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div style="width: 6px; height: 28px; border-radius: 3px; background-color: #0f172a;"></div>
+                                        <div>
+                                            <div class="fw-bold text-dark">{{ fat.cartao_nome }}</div>
+                                            <small class="text-muted">
+                                                Avulsos: {{ fat.avulsos | moeda }} | Parc: {{ fat.parcelas | moeda }}
+                                            </small>
+                                        </div>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="fw-bold text-dark">{{ fat.total | moeda }}</div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <div class="text-center text-muted py-3 small">
+                                <i class="bi bi-credit-card fs-4 d-block mb-1"></i>
+                                Nenhuma fatura com vencimento neste mês.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Detalhamento por Modalidade -->
+                <div class="card card-clean p-3">
+                    <h6 class="fw-bold text-dark mb-3">
+                        <i class="bi bi-layers me-2"></i>Composição dos Gastos no Mês
+                    </h6>
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                        <span class="text-muted"><i class="bi bi-receipt me-2"></i>Lançamentos Avulsos:</span>
+                        <span class="fw-bold text-dark">{{ resumo.total_avulsos | moeda }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                        <span class="text-muted"><i class="bi bi-calendar-range me-2"></i>Compras Parceladas:</span>
+                        <span class="fw-bold text-dark">{{ resumo.total_parcelas | moeda }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                        <span class="text-muted"><i class="bi bi-arrow-repeat me-2"></i>Gastos Recorrentes:</span>
+                        <span class="fw-bold text-dark">{{ resumo.total_recorrentes | moeda }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center pt-2">
+                        <span class="fw-bold text-dark">Total Geral:</span>
+                        <span class="fw-bold text-dark fs-5">{{ resumo.total_gastos | moeda }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEÇÃO: ÚLTIMAS TRANSAÇÕES REGISTRADAS NESTE MÊS -->
+    <div class="card card-clean mb-4 overflow-hidden">
+        <div class="card-header bg-white border-bottom py-3 px-4 d-flex justify-content-between align-items-center">
+            <div>
+                <h5 class="fw-bold mb-0 text-dark">
+                    <i class="bi bi-clock-history me-2"></i>Lançamentos Recentes no Mês
+                </h5>
+                <small class="text-muted">Despesas avulsas e parcelas com impacto na competência deste mês.</small>
+            </div>
+            <div class="d-flex gap-2">
+                <button class="btn-action btn-primary-action" data-bs-toggle="modal" data-bs-target="#modalNovoLancamento">
+                    <i class="bi bi-plus-circle"></i> Novo Lançamento
+                </button>
+                <a href="{{ url_for('lancamentos', mes=ano_mes) }}" class="btn-action btn-neutral-action text-decoration-none">
+                    Ver Todos ({{ resumo.lancamentos_mes | length }})
+                </a>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-custom mb-0">
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Descrição</th>
+                        <th>Categoria</th>
+                        <th>Pagamento</th>
+                        <th>Vencimento / Fatura</th>
+                        <th class="text-end">Valor (R$)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for l in resumo.lancamentos_mes[:10] %}
+                    <tr>
+                        <td class="text-muted small">{{ l.data | data_br }}</td>
+                        <td>
+                            <span class="fw-bold text-dark">{{ l.descricao }}</span>
+                            {% if l.observacao %}
+                                <small class="text-muted d-block">{{ l.observacao }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border">{{ l.categoria }}</span>
+                        </td>
+                        <td>
+                            {% if l.cartao_nome %}
+                                <span class="badge bg-dark text-white">
+                                    <i class="bi bi-credit-card me-1"></i>{{ l.cartao_nome }}
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-dark border">
+                                    {{ l.metodo_pagamento }}
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="small text-muted">
+                            {% if l.cartao_id %}
+                                <span class="text-dark fw-bold"><i class="bi bi-calendar-event me-1"></i>Venc: {{ l.data_vencimento | data_br }}</span>
+                                <small class="text-muted d-block">(Fatura {{ l.fatura_mes }})</small>
+                            {% else %}
+                                <span>{{ l.data | data_br }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end fw-bold text-dark">
+                            -{{ l.valor | moeda }}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center py-4 text-muted">
+                            Nenhum lançamento avulso registrado para este mês.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    // 1. Gráfico de Rosca de Categorias (Tons monocromáticos e contrastantes)
+    const catLabels = {{ resumo.grafico_categorias.labels | tojson }};
+    const catValores = {{ resumo.grafico_categorias.valores | tojson }};
+    // Cores monocromáticas para gráfico limpo
+    const grayscalePalette = ["#09090b", "#27272a", "#3f3f46", "#52525b", "#71717a", "#a1a1aa", "#d4d4d8", "#18181b", "#78716c", "#57534e", "#44403c"];
+
+    const ctxCat = document.getElementById("chartCategorias");
+    if (ctxCat && catValores.length > 0) {
+        new Chart(ctxCat, {
+            type: "doughnut",
+            data: {
+                labels: catLabels,
+                datasets: [{
+                    data: catValores,
+                    backgroundColor: grayscalePalette.slice(0, catValores.length),
+                    borderWidth: 2,
+                    borderColor: "#ffffff"
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 300 }, // Rápido para não travar GPU
+                plugins: {
+                    legend: {
+                        position: "right",
+                        labels: { boxWidth: 12, font: { size: 11, family: "Plus Jakarta Sans" } }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const val = context.raw || 0;
+                                return `${context.label}: R$ ${val.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
+                            }
+                        }
+                    }
+                },
+                cutout: "70%"
+            }
+        });
+    }
+
+    // 2. Gráfico de Barras: Comparativo Orçamento vs Realizado
+    const comparativoLabels = [{% for c in resumo.categorias %}"{{ c.categoria }}",{% endfor %}];
+    const comparativoRealizado = [{% for c in resumo.categorias %}{{ c.gasto_total }},{% endfor %}];
+    const comparativoLimite = [{% for c in resumo.categorias %}{{ c.limite }},{% endfor %}];
+
+    const ctxComp = document.getElementById("chartComparativo");
+    if (ctxComp) {
+        new Chart(ctxComp, {
+            type: "bar",
+            data: {
+                labels: comparativoLabels,
+                datasets: [
+                    {
+                        label: "Gasto Realizado (R$)",
+                        data: comparativoRealizado,
+                        backgroundColor: "#09090b", // Preto sólido
+                        borderRadius: 4
+                    },
+                    {
+                        label: "Limite Estipulado (R$)",
+                        data: comparativoLimite,
+                        backgroundColor: "#cbd5e1", // Cinza claro sólido
+                        borderRadius: 4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 300 },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: {
+                        ticks: {
+                            callback: function(value) {
+                                return "R$ " + value.toLocaleString('pt-BR');
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: { position: "top", labels: { boxWidth: 12 } },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.dataset.label}: R$ ${context.raw.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

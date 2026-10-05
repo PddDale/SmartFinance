@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}SmartFinance &bull; Configurações{% endblock %}
+
+{% block content %}
+<div class="pt-3">
+
+    <!-- CABEÇALHO DA PÁGINA -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-bold text-dark mb-0">Configurações e Orçamento</h1>
+            <p class="text-muted small mb-0">Defina suas fontes de renda mensal, saldos de patrimônio e limites por categoria de gasto.</p>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <a href="{{ url_for('exportar_json') }}" class="btn-action btn-primary-action text-decoration-none">
+                <i class="bi bi-download"></i> Exportar JSON (Backup)
+            </a>
+            <form action="{{ url_for('carregar_dados_demo') }}" method="POST" onsubmit="return confirm('Deseja recarregar o banco de dados com os dados demonstrativos?');">
+                <button type="submit" class="btn btn-outline-dark rounded-pill px-3" title="Recarregar Dados Demo">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Carregar Dados Demo
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-4">
+
+        <!-- COLUNA 1: RENDAS MENSAIS E PATRIMÔNIO (MONOCROMÁTICO) -->
+        <div class="col-12 col-lg-5">
+            <div class="card card-clean p-4 mb-4">
+                <h5 class="fw-bold text-dark mb-3">
+                    <i class="bi bi-cash-stack me-2"></i>Renda Mensal e Patrimônio
+                </h5>
+                <form action="{{ url_for('salvar_configuracoes') }}" method="POST">
+                    <!-- Salário -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-muted">Salário Líquido Mensal (R$)</label>
+                        <input type="number" step="0.01" min="0" class="form-control form-control-lg fw-bold" name="salario" value="{{ config.salario }}" required>
+                        <div class="form-text small">Salário creditado mensalmente na conta.</div>
+                    </div>
+
+                    <!-- Outras Rendas -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-muted">Outras Rendas / Extras (R$)</label>
+                        <input type="number" step="0.01" min="0" class="form-control form-control-lg fw-bold" name="outras_rendas" value="{{ config.outras_rendas }}">
+                        <div class="form-text small">Freelances, dividendos, aluguéis recebidos, etc.</div>
+                    </div>
+
+                    <div class="p-3 bg-light rounded-3 mb-3 border">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="text-muted small fw-bold">RENDA TOTAL DISPONÍVEL:</span>
+                            <span class="fw-bold text-dark fs-5">{{ config.renda_total | moeda }}</span>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <h6 class="fw-bold text-dark mb-3">
+                        <i class="bi bi-bank me-2"></i>Saldos de Patrimônio
+                    </h6>
+
+                    <!-- Saldo Conta Corrente -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-muted">Saldo em Conta Corrente (R$)</label>
+                        <input type="number" step="0.01" class="form-control fw-bold" name="saldo_conta_corrente" value="{{ config.saldo_conta_corrente }}" required>
+                    </div>
+
+                    <!-- Investimentos -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-muted">Valor em Investimentos / Aplicações (R$)</label>
+                        <input type="number" step="0.01" class="form-control fw-bold" name="valor_investido" value="{{ config.valor_investido }}" required>
+                    </div>
+
+                    <div class="p-3 bg-light rounded-3 mb-4 border">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="text-muted small fw-bold">PATRIMÔNIO LÍQUIDO TOTAL:</span>
+                            <span class="fw-bold text-dark fs-5">{{ config.patrimonio_total | moeda }}</span>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-action btn-primary-action w-100 justify-content-center py-2">
+                        <i class="bi bi-check2-circle"></i> Salvar Rendas e Saldos
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- COLUNA 2: LIMITES DE GASTO POR CATEGORIA -->
+        <div class="col-12 col-lg-7">
+            <div class="card card-clean p-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="fw-bold text-dark mb-0">
+                        <i class="bi bi-sliders me-2"></i>Limites Mensais por Categoria
+                    </h5>
+                    <span class="badge bg-light text-dark border">11 Categorias</span>
+                </div>
+                <p class="text-muted small">Estipule um teto de gastos para cada categoria. O sistema avisará quando o teto for atingido ou ultrapassado.</p>
+
+                <form action="{{ url_for('salvar_limites_categoria') }}" method="POST">
+                    <div class="table-responsive">
+                        <table class="table table-custom align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Categoria</th>
+                                    <th style="width: 200px;">Limite Mensal Estipulado (R$)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for cat in limites %}
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #0f172a;"></div>
+                                            <i class="bi {{ cat.icone }} text-muted"></i>
+                                            <span class="fw-bold text-dark">{{ cat.categoria }}</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text bg-white text-muted">R$</span>
+                                            <input type="number" step="0.01" min="0" class="form-control text-end fw-bold"
+                                                   name="limite_{{ cat.categoria }}" value="{{ cat.limite_mensal }}" required>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="mt-4">
+                        <button type="submit" class="btn-action btn-primary-action px-4">
+                            <i class="bi bi-save"></i> Salvar Todos os Limites
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}
