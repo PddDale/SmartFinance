@@ -4,6 +4,19 @@ Aplicação web profissional desenvolvida em **Python (Flask)** com servidor de 
 
 ---
 
+## 🌱 Propósito, código aberto e privacidade
+
+O SmartFinance existe para ajudar cada pessoa a organizar as próprias finanças de forma simples, clara e independente. O projeto busca ser aberto à colaboração e à auditoria: qualquer pessoa pode estudar o código, sugerir melhorias e contribuir.
+
+- **Privacidade em primeiro lugar:** lançamentos, rendas, cartões e saldos são armazenados no SQLite local (`Recursos/Dados/finance.db`), no computador onde a aplicação é executada. O SmartFinance não envia esses dados financeiros para serviços de nuvem.
+- **Controle dos dados:** o banco de dados permanece com a pessoa usuária; a exportação JSON permite criar uma cópia de segurança.
+- **Simplicidade:** a aplicação deve ser fácil de iniciar e usar, sem exigir a criação manual de ambientes virtuais.
+- **Transparência:** mudanças e funcionalidades devem preservar a autonomia e a confidencialidade dos dados financeiros.
+
+O navegador carrega Bootstrap, ícones, gráficos e fontes a partir de CDNs externos. Esses recursos visuais não recebem os dados financeiros da aplicação; para uso sem conexão ou sem requisições a CDNs, os assets podem ser hospedados localmente.
+
+---
+
 ## 🎨 Identidade Visual e Filosofia de Design
 
 - **Base Monocromática (Preto, Branco e Cinza):** Todo o corpo da aplicação, cabeçalhos, painéis e tabelas utilizam tons puros de preto, branco e cinza para uma interface limpa, sóbria e focada.
@@ -38,21 +51,57 @@ A aplicação agora utiliza o servidor **Waitress**, um servidor WSGI pronto par
 
 ---
 
+## 🗂️ Organização dos arquivos
+
+A raiz do projeto mantém somente os arquivos de entrada e orientação. Os componentes técnicos ficam agrupados por tipo dentro de `Recursos`:
+
+```text
+SmartFinance/
+├── SmartFinance.bat          # Inicialização em um clique no Windows
+├── README.md                 # Apresentação, instruções e documentação
+├── .gitignore                # Exclusões do Git, incluindo dados pessoais
+└── Recursos/
+    ├── Codigo/               # Aplicação Flask, modelos e banco de dados
+    ├── Interface/            # Templates HTML, CSS e JavaScript
+    ├── Dependencias/         # Lista de pacotes Python
+    ├── Testes/               # Testes automatizados
+    └── Dados/                # Banco SQLite local (criado automaticamente)
+```
+
+O diretório `Recursos/Dados` guarda informações financeiras locais e é ignorado pelo Git. Não compartilhe nem publique o banco de dados pessoal.
+
+---
+
 ## 🛠️ Como Executar
 
 ### Opção 1: Inicialização em 1 Clique (Recomendado)
-Dê um duplo clique no arquivo **`run.bat`**:
+Dê um duplo clique no arquivo **`SmartFinance.bat`** na raiz do projeto:
 ```cmd
-run.bat
+SmartFinance.bat
 ```
 O script iniciará o servidor Waitress e abrirá seu navegador automaticamente em `http://127.0.0.1:5000`.
+Na primeira execução, ou quando uma dependência precisar de atualização, o script instala/atualiza globalmente no Python selecionado pelo comando `py` os pacotes listados em `Recursos\Dependencias\requirements.txt`. É necessária conexão com a internet. Se o Windows negar permissão de escrita na instalação do Python, execute `SmartFinance.bat` como administrador.
 
-### Opção 2: Linha de Comando (PowerShell / CMD)
+### Opção 2: Linha de Comando (PowerShell)
 ```powershell
-py -m pip install -r requirements.txt
-py app.py
+py -m pip install --upgrade -r Recursos\Dependencias\requirements.txt
+py Recursos\Codigo\app.py
 ```
 Acesse: **[http://127.0.0.1:5000](http://127.0.0.1:5000)**
+
+No Prompt de Comando do Windows, use:
+```cmd
+py -m pip install --upgrade -r Recursos\Dependencias\requirements.txt
+py Recursos\Codigo\app.py
+```
+O `pip` instala/atualiza as dependências na instalação Python global selecionada por `py`; se houver erro de permissão, execute o terminal como administrador.
+
+### Executar os testes
+
+Na raiz do repositório, execute:
+```powershell
+py -m unittest discover -s Recursos\Testes -t . -p test_app.py
+```
 
 ---
 

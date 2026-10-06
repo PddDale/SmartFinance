@@ -31,7 +31,48 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // 7. Auto-categorização de despesas por IA de regras
     setupAutoCategorizar();
+
+    // 8. Sincronizar os campos de renda mensal e anual
+    setupRendasAnoMes();
+
+    // 9. Presets de cores de cartões com opção de cor personalizada
+    setupCoresCartoes();
 });
+
+function setupRendasAnoMes() {
+    const modoInput = document.getElementById("modo_renda");
+    document.querySelectorAll("[data-income-key]").forEach(function (input) {
+        input.addEventListener("input", function () {
+            const anual = this.name.endsWith("_anual") || this.name.endsWith("_anuais");
+            const correspondente = Array.from(document.querySelectorAll("[data-income-key]"))
+                .find(function (campo) {
+                    return campo !== input &&
+                        campo.dataset.incomeKey === input.dataset.incomeKey &&
+                        campo.name.endsWith(anual ? "_mensal" : (input.dataset.incomeKey === "salario" ? "_anual" : "_anuais"));
+                });
+            if (!correspondente) return;
+
+            const valor = Number(this.value);
+            correspondente.value = this.value === "" || !Number.isFinite(valor)
+                ? ""
+                : (anual ? valor / 12 : valor * 12).toFixed(2);
+            if (modoInput) modoInput.value = anual ? "anual" : "mensal";
+        });
+    });
+}
+
+function setupCoresCartoes() {
+    document.querySelectorAll("[data-color-preset]").forEach(function (select) {
+        const colorInput = document.getElementById(select.dataset.colorPreset);
+        if (!colorInput) return;
+        select.addEventListener("change", function () {
+            if (this.value) colorInput.value = this.value;
+        });
+        colorInput.addEventListener("input", function () {
+            select.value = "";
+        });
+    });
+}
 
 function setupMetodoPagamentoListener(metodoSelectId, cartaoContainerId, cartaoSelectId, dataInputId, previewContainerId) {
     const metodoSelect = document.getElementById(metodoSelectId);
@@ -233,6 +274,10 @@ function preencherModalEdicaoCartao(id, nome, lim, fech, venc, cor, band) {
     document.getElementById("edit_cartao_fechamento").value = fech;
     document.getElementById("edit_cartao_vencimento").value = venc;
     document.getElementById("edit_cartao_cor").value = cor;
+    const preset = document.getElementById("edit_cartao_cor_preset");
+    if (preset) preset.value = Array.from(preset.options).some(function (option) {
+        return option.value === cor;
+    }) ? cor : "";
     document.getElementById("edit_cartao_bandeira").value = band;
 
     const editModal = new bootstrap.Modal(document.getElementById("modalEditarCartao"));
@@ -410,4 +455,3 @@ function setupAutoCategorizar() {
         });
     });
 }
-

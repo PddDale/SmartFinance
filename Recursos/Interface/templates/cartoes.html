@@ -259,7 +259,20 @@
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-bold small text-muted">Cor do Cartão</label>
-                            <input type="color" class="form-control form-control-color w-100" name="cor" id="edit_cartao_cor">
+                            <select class="form-select mb-2" data-color-preset="edit_cartao_cor" id="edit_cartao_cor_preset">
+                                <option value="">Cor personalizada</option>
+                                <option value="#820ad1">Nubank — roxo</option>
+                                <option value="#ec7000">Itaú — laranja</option>
+                                <option value="#cc092f">Bradesco — vermelho</option>
+                                <option value="#003882">Banco do Brasil — azul</option>
+                                <option value="#ec0000">Santander — vermelho</option>
+                                <option value="#ff7a00">Inter — laranja</option>
+                                <option value="#111111">C6 Bank — preto</option>
+                                <option value="#005ca9">Caixa — azul</option>
+                                <option value="#00aeef">Neon — azul-claro</option>
+                                <option value="#21c25e">PicPay — verde</option>
+                            </select>
+                            <input type="color" class="form-control form-control-color w-100" name="cor" id="edit_cartao_cor" value="#820ad1">
                         </div>
                     </div>
                 </div>

@@ -297,7 +297,7 @@
                             <div class="col-md-6">
                                 <label class="form-label fw-bold small text-muted">Método de Pagamento</label>
                                 <select class="form-select" name="metodo_pagamento" id="modal_metodo_pagamento" required>
-                                    <option value="Conta Corrente">Conta Corrente</option>
+                                    <option value="Cartão de Débito">Cartão de Débito</option>
                                     <option value="Pix">Pix</option>
                                     <option value="Dinheiro">Dinheiro</option>
                                     <option value="Cartão de Crédito" selected>Cartão de Crédito</option>
@@ -480,8 +480,21 @@
                                 <div class="form-text small">Dia do pagamento do boleto.</div>
                             </div>
                             <div class="col-12">
-                                <label class="form-label fw-bold small text-muted">Cor do Cartão (Para a Interface)</label>
-                                <input type="color" class="form-control form-control-color w-100" name="cor" value="#1e293b" title="Escolha a cor do cartão">
+                                <label class="form-label fw-bold small text-muted">Cor do Cartão</label>
+                                <select class="form-select mb-2" data-color-preset="cartao_cor">
+                                    <option value="">Cor personalizada</option>
+                                    <option value="#820ad1">Nubank — roxo</option>
+                                    <option value="#ec7000">Itaú — laranja</option>
+                                    <option value="#cc092f">Bradesco — vermelho</option>
+                                    <option value="#003882">Banco do Brasil — azul</option>
+                                    <option value="#ec0000">Santander — vermelho</option>
+                                    <option value="#ff7a00">Inter — laranja</option>
+                                    <option value="#111111">C6 Bank — preto</option>
+                                    <option value="#005ca9">Caixa — azul</option>
+                                    <option value="#00aeef">Neon — azul-claro</option>
+                                    <option value="#21c25e">PicPay — verde</option>
+                                </select>
+                                <input type="color" class="form-control form-control-color w-100" name="cor" id="cartao_cor" value="#820ad1" title="Escolha qualquer cor">
                             </div>
                         </div>
                     </div>

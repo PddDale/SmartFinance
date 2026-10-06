@@ -1,0 +1,1 @@
+"""SmartFinance application modules."""

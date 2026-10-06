@@ -4,7 +4,7 @@ import json
 from datetime import datetime, date
 import calendar
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "finance.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Dados", "finance.db")
 
 CATEGORIAS_PADRAO = [
     ("Moradia", 1800.0, "bi-house-door", "#4f46e5"),
@@ -22,6 +22,7 @@ CATEGORIAS_PADRAO = [
 
 def get_db_connection():
     """Retorna uma conexão SQLite configurada com suporte a dicionários."""
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
@@ -42,6 +43,37 @@ def init_db():
             valor_investido REAL NOT NULL DEFAULT 0.0,
             data_atualizacao TEXT
         );
+    """)
+
+    # Migrar colunas de preferências de forma compatível com bancos existentes.
+    colunas_config = {
+        row["name"] for row in cursor.execute("PRAGMA table_info(configuracoes);")
+    }
+    if "ano_ativo" not in colunas_config:
+        cursor.execute("ALTER TABLE configuracoes ADD COLUMN ano_ativo INTEGER;")
+    if "formato_data" not in colunas_config:
+        cursor.execute(
+            "ALTER TABLE configuracoes ADD COLUMN formato_data TEXT NOT NULL DEFAULT 'dd/mm/aaaa';"
+        )
+    cursor.execute("""
+        UPDATE configuracoes
+        SET ano_ativo = CAST(strftime('%Y', 'now', 'localtime') AS INTEGER)
+        WHERE ano_ativo IS NULL OR ano_ativo < 1;
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rendas_anuais (
+            ano INTEGER PRIMARY KEY CHECK (ano BETWEEN 1 AND 9999),
+            salario_mensal REAL NOT NULL DEFAULT 0.0,
+            outras_rendas_mensais REAL NOT NULL DEFAULT 0.0,
+            data_atualizacao TEXT
+        );
+    """)
+    cursor.execute("""
+        INSERT OR IGNORE INTO rendas_anuais
+            (ano, salario_mensal, outras_rendas_mensais, data_atualizacao)
+        SELECT ano_ativo, salario, outras_rendas, data_atualizacao
+        FROM configuracoes WHERE id = 1;
     """)
 
     # 2. Limites por categoria
@@ -79,7 +111,7 @@ def init_db():
             categoria TEXT NOT NULL,
             valor REAL NOT NULL,
             observacao TEXT,
-            metodo_pagamento TEXT NOT NULL,   -- 'Conta Corrente', 'Pix', 'Dinheiro' ou 'Cartão de Crédito'
+            metodo_pagamento TEXT NOT NULL,   -- Cartão de Débito, Pix, Dinheiro ou Cartão de Crédito
             cartao_id INTEGER REFERENCES cartoes(id) ON DELETE SET NULL,
             fatura_mes TEXT,                  -- YYYY-MM (mês de fechamento/competência da fatura)
             mes_vencimento TEXT,             -- YYYY-MM (mês em que a fatura vence e deve ser paga)
@@ -87,7 +119,6 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
     """)
-
     # 5. Compras Parceladas (Cabeçalho)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS compras_parceladas (
@@ -130,7 +161,7 @@ def init_db():
             valor_mensal REAL NOT NULL,
             categoria TEXT NOT NULL,
             dia_cobranca INTEGER DEFAULT 5,
-            metodo_pagamento TEXT DEFAULT 'Conta Corrente',
+            metodo_pagamento TEXT DEFAULT 'Cartão de Débito',
             cartao_id INTEGER REFERENCES cartoes(id) ON DELETE SET NULL,
             ativo_padrao INTEGER DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -147,6 +178,14 @@ def init_db():
             UNIQUE(recorrente_id, ano_mes)
         );
     """)
+    cursor.execute("""
+        UPDATE lancamentos SET metodo_pagamento = 'Cartão de Débito'
+        WHERE metodo_pagamento = 'Conta Corrente';
+    """)
+    cursor.execute("""
+        UPDATE gastos_recorrentes SET metodo_pagamento = 'Cartão de Débito'
+        WHERE metodo_pagamento = 'Conta Corrente';
+    """)
 
     # Inicializar registro de configurações se vazio
     cursor.execute("SELECT COUNT(*) FROM configuracoes;")
@@ -155,6 +194,17 @@ def init_db():
             INSERT INTO configuracoes (id, salario, outras_rendas, saldo_conta_corrente, valor_investido, data_atualizacao)
             VALUES (1, 4500.0, 500.0, 3250.0, 25400.0, datetime('now', 'localtime'));
         """)
+    cursor.execute("""
+        UPDATE configuracoes
+        SET ano_ativo = CAST(strftime('%Y', 'now', 'localtime') AS INTEGER)
+        WHERE id = 1 AND (ano_ativo IS NULL OR ano_ativo < 1);
+    """)
+    cursor.execute("""
+        INSERT OR IGNORE INTO rendas_anuais
+            (ano, salario_mensal, outras_rendas_mensais, data_atualizacao)
+        SELECT ano_ativo, salario, outras_rendas, data_atualizacao
+        FROM configuracoes WHERE id = 1;
+    """)
 
     # Inicializar ou atualizar categorias padrão com cores distintas e vibrantes
     for cat, lim, icon, color in CATEGORIAS_PADRAO:
@@ -325,7 +375,7 @@ def popular_dados_exemplo():
         
         # Mês anterior
         (f"{mes_ant_str}-03", "Supermercado Carrefour", "Alimentação", 412.00, "Cartão de Crédito", "Nubank Ultravioleta", "Compras quinzenais"),
-        (f"{mes_ant_str}-08", "Uber e Metrô", "Transporte", 135.40, "Conta Corrente", None, "Deslocamentos urbanos"),
+        (f"{mes_ant_str}-08", "Uber e Metrô", "Transporte", 135.40, "Cartão de Débito", None, "Deslocamentos urbanos"),
         (f"{mes_ant_str}-14", "Jantar Japonês", "Alimentação", 195.00, "Cartão de Crédito", "XP Visa Infinite", "Comemoração"),
         (f"{mes_ant_str}-20", "Exames Médicos Laboratório", "Saúde", 180.00, "Pix", None, "Check-up de rotina")
     ]
@@ -372,12 +422,12 @@ def popular_dados_exemplo():
 
     # 5. Gastos Recorrentes
     recorrentes_demo = [
-        ("Aluguel do Apartamento", 1500.0, "Moradia", 5, "Conta Corrente", None),
-        ("Condomínio Residencial", 420.0, "Moradia", 10, "Conta Corrente", None),
+        ("Aluguel do Apartamento", 1500.0, "Moradia", 5, "Cartão de Débito", None),
+        ("Condomínio Residencial", 420.0, "Moradia", 10, "Cartão de Débito", None),
         ("Internet Fibra 500MB", 129.90, "Moradia", 15, "Pix", None),
         ("Assinatura Netflix Premium", 55.90, "Lazer", 20, "Cartão de Crédito", cartao_ids["Nubank Ultravioleta"]),
         ("Spotify Familiar", 34.90, "Lazer", 12, "Cartão de Crédito", cartao_ids["Nubank Ultravioleta"]),
-        ("Plano de Saúde", 320.00, "Saúde", 8, "Conta Corrente", None),
+        ("Plano de Saúde", 320.00, "Saúde", 8, "Cartão de Débito", None),
         ("Academia Smart Fit", 119.90, "Saúde", 1, "Cartão de Crédito", cartao_ids["XP Visa Infinite"])
     ]
 
@@ -395,4 +445,3 @@ if __name__ == "__main__":
     init_db()
     popular_dados_exemplo()
     print("Banco de dados SQLite inicializado com sucesso!")
-

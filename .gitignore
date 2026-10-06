@@ -9,6 +9,7 @@
 *.db
 *.sqlite
 *.sqlite3
+Recursos/Dependencias/Pacotes/
 database.json
 backup_*.json
 
@@ -111,4 +112,3 @@ yarn-error.log*
 *.orig
 uploads/
 temp/
-

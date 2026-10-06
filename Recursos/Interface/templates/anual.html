@@ -14,12 +14,10 @@
 
         <!-- Seletor de Ano -->
         <form method="GET" action="{{ url_for('anual') }}" class="d-flex align-items-center gap-2">
-            <label class="small text-muted fw-bold">Ano de Referência:</label>
-            <select name="ano" class="form-select form-select-sm fw-bold" style="width: 120px;" onchange="this.form.submit()">
-                {% for y in range(global_ano_atual - 2, global_ano_atual + 4) %}
-                    <option value="{{ y }}" {% if ano == y %}selected{% endif %}>{{ y }}</option>
-                {% endfor %}
-            </select>
+            <label for="ano_visao" class="small text-muted fw-bold">Ano de Referência:</label>
+            <input id="ano_visao" type="number" name="ano" class="form-control form-control-sm fw-bold"
+                   min="1" max="9999" value="{{ ano }}" style="width: 120px;">
+            <button class="btn-action btn-neutral-action py-1 px-3" type="submit">Ver ano</button>
         </form>
     </div>
 
@@ -228,12 +226,8 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    // 2. Gráfico Categorias Empilhadas Monocromático
+    // 2. Gráfico de categorias com as cores configuradas
     const datasetsCat = {{ dados.datasets_categorias | tojson }};
-    const grayColors = ["#09090b", "#27272a", "#3f3f46", "#52525b", "#71717a", "#a1a1aa", "#d4d4d8", "#18181b", "#78716c", "#57534e", "#44403c"];
-    datasetsCat.forEach((ds, idx) => {
-        ds.backgroundColor = grayColors[idx % grayColors.length];
-    });
 
     const ctxCat = document.getElementById("chartCategoriasAnual");
     if (ctxCat && datasetsCat.length > 0) {

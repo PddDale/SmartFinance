@@ -2,7 +2,10 @@ import sqlite3
 from datetime import datetime, date
 import calendar
 import json
-from database import get_db_connection, calcular_fatura_e_vencimento, gerar_parcelas_compra, add_months
+if __package__:
+    from .database import get_db_connection, calcular_fatura_e_vencimento, gerar_parcelas_compra, add_months
+else:
+    from database import get_db_connection, calcular_fatura_e_vencimento, gerar_parcelas_compra, add_months
 
 def formatar_moeda(valor):
     """Formata um float para padrão de moeda brasileira R$ 1.234,56."""
@@ -10,15 +13,15 @@ def formatar_moeda(valor):
         valor = 0.0
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def get_configuracoes():
-    """Recupera as configurações e saldos de patrimônio."""
+def get_configuracoes(ano=None):
+    """Recupera preferências, saldos e renda mensal do ano selecionado."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM configuracoes WHERE id = 1;")
     row = cursor.fetchone()
-    conn.close()
 
     if not row:
+        conn.close()
         return {
             "salario": 0.0,
             "outras_rendas": 0.0,
@@ -26,34 +29,75 @@ def get_configuracoes():
             "saldo_conta_corrente": 0.0,
             "valor_investido": 0.0,
             "patrimonio_total": 0.0,
-            "data_atualizacao": ""
+            "data_atualizacao": "",
+            "salario_anual": 0.0,
+            "outras_rendas_anuais": 0.0,
+            "ano_ativo": date.today().year,
+            "formato_data": "dd/mm/aaaa"
         }
 
-    salario = float(row["salario"] or 0.0)
-    outras_rendas = float(row["outras_rendas"] or 0.0)
+    ano_ativo = int(ano or row["ano_ativo"] or date.today().year)
+    cursor.execute("SELECT salario_mensal, outras_rendas_mensais FROM rendas_anuais WHERE ano = ?;", (ano_ativo,))
+    renda_ano = cursor.fetchone()
+    salario = float((renda_ano["salario_mensal"] if renda_ano else row["salario"]) or 0.0)
+    outras_rendas = float((renda_ano["outras_rendas_mensais"] if renda_ano else row["outras_rendas"]) or 0.0)
     saldo_cc = float(row["saldo_conta_corrente"] or 0.0)
     invest = float(row["valor_investido"] or 0.0)
+    conn.close()
 
     return {
         "salario": salario,
+        "salario_anual": salario * 12,
         "outras_rendas": outras_rendas,
+        "outras_rendas_anuais": outras_rendas * 12,
         "renda_total": salario + outras_rendas,
         "saldo_conta_corrente": saldo_cc,
         "valor_investido": invest,
         "patrimonio_total": saldo_cc + invest,
-        "data_atualizacao": row["data_atualizacao"] or ""
+        "data_atualizacao": row["data_atualizacao"] or "",
+        "ano_ativo": ano_ativo,
+        "formato_data": row["formato_data"] or "dd/mm/aaaa"
     }
 
-def update_configuracoes(salario, outras_rendas, saldo_conta_corrente, valor_investido):
-    """Atualiza as configurações de renda e saldos bancários."""
+def update_configuracoes(salario, outras_rendas, saldo_conta_corrente, valor_investido, ano=None, formato_data=None):
+    """Atualiza rendas do ano, saldos e preferências gerais."""
     conn = get_db_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT ano_ativo FROM configuracoes WHERE id = 1;")
+    config = cursor.fetchone()
+    ano = int(ano or (config["ano_ativo"] if config else date.today().year))
+    cursor.execute("""
+        INSERT INTO rendas_anuais (ano, salario_mensal, outras_rendas_mensais, data_atualizacao)
+        VALUES (?, ?, ?, datetime('now', 'localtime'))
+        ON CONFLICT(ano) DO UPDATE SET
+            salario_mensal = excluded.salario_mensal,
+            outras_rendas_mensais = excluded.outras_rendas_mensais,
+            data_atualizacao = excluded.data_atualizacao;
+    """, (ano, salario, outras_rendas))
     cursor.execute("""
         UPDATE configuracoes
         SET salario = ?, outras_rendas = ?, saldo_conta_corrente = ?, valor_investido = ?,
+            ano_ativo = ?, formato_data = COALESCE(?, formato_data),
             data_atualizacao = datetime('now', 'localtime')
         WHERE id = 1;
-    """, (salario, outras_rendas, saldo_conta_corrente, valor_investido))
+    """, (salario, outras_rendas, saldo_conta_corrente, valor_investido, ano, formato_data))
+    conn.commit()
+    conn.close()
+
+def update_ano_ativo(ano):
+    """Persiste o ano selecionado e inicializa a renda deste ano, se necessário."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT salario, outras_rendas FROM configuracoes WHERE id = 1;")
+    config = cursor.fetchone()
+    if config is None:
+        conn.close()
+        raise ValueError("As configurações financeiras não foram inicializadas.")
+    cursor.execute("""
+        INSERT OR IGNORE INTO rendas_anuais (ano, salario_mensal, outras_rendas_mensais, data_atualizacao)
+        VALUES (?, ?, ?, datetime('now', 'localtime'));
+    """, (ano, config["salario"], config["outras_rendas"]))
+    cursor.execute("UPDATE configuracoes SET ano_ativo = ? WHERE id = 1;", (ano,))
     conn.commit()
     conn.close()
 
@@ -208,7 +252,7 @@ def get_resumo_mensal(ano_mes):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    config = get_configuracoes()
+    config = get_configuracoes(int(ano_mes[:4]))
     renda_total = config["renda_total"]
 
     # 1. Limites por categoria
@@ -408,7 +452,7 @@ def get_visao_anual(ano):
     meses = [f"{ano}-{m:02d}" for m in range(1, 13)]
     meses_abrev = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
-    config = get_configuracoes()
+    config = get_configuracoes(ano)
     renda_mensal = config["renda_total"]
 
     limites = get_limites_categoria()
@@ -577,7 +621,7 @@ def add_compra_parcelada(descricao, data_compra, valor_total, entrada, num_parce
     if entrada > 0:
         cursor.execute("""
             INSERT INTO lancamentos (data, ano_mes, descricao, categoria, valor, observacao, metodo_pagamento, mes_vencimento, data_vencimento)
-            VALUES (?, ?, ?, ?, ?, ?, 'Conta Corrente', ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, 'Cartão de Débito', ?, ?);
         """, (data_compra, data_compra[:7], f"Entrada: {descricao}", categoria, entrada, f"Entrada da compra parcelada #{compra_id}", data_compra[:7], data_compra))
 
     conn.commit()
@@ -715,6 +759,9 @@ def exportar_backup_json():
     parcelas_detalhe = [dict(r) for r in cursor.execute("SELECT * FROM parcelas_detalhe;").fetchall()]
     recorrentes = [dict(r) for r in cursor.execute("SELECT * FROM gastos_recorrentes;").fetchall()]
     status_recorrentes = [dict(r) for r in cursor.execute("SELECT * FROM recorrentes_status_mes;").fetchall()]
+    rendas_anuais = [
+        dict(r) for r in cursor.execute("SELECT * FROM rendas_anuais ORDER BY ano;").fetchall()
+    ]
 
     conn.close()
 
@@ -724,7 +771,10 @@ def exportar_backup_json():
         "configuracoes": {
             "salario": config["salario"],
             "outras_rendas": config["outras_rendas"],
-            "limites_categoria": limites_dict
+            "limites_categoria": limites_dict,
+            "ano_ativo": config["ano_ativo"],
+            "formato_data": config["formato_data"],
+            "rendas_anuais": rendas_anuais
         },
         "saldos": {
             "conta_corrente": config["saldo_conta_corrente"],
@@ -846,5 +896,3 @@ def classificar_despesa(descricao):
                 return {"categoria": cat, "origem": "regras_inteligentes", "palavra_chave": palavra}
 
     return {"categoria": "Outros", "origem": "padrao"}
-
-

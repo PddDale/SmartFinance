@@ -1,11 +1,23 @@
 import os
 from datetime import datetime, date
 import json
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, Response
-import database
-import models
+from pathlib import Path
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Response
+from jinja2 import pass_context
 
-app = Flask(__name__)
+if __package__:
+    from . import database, models
+else:
+    import database
+    import models
+
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+RESOURCE_DIR = PROJECT_DIR / "Recursos"
+app = Flask(
+    __name__,
+    template_folder=str(RESOURCE_DIR / "Interface" / "templates"),
+    static_folder=str(RESOURCE_DIR / "Interface" / "static")
+)
 app.secret_key = "controle-financeiro-segredo-super-seguro"
 
 # Inicializar banco de dados se necessário
@@ -16,18 +28,36 @@ def filter_moeda(valor):
     return models.formatar_moeda(valor)
 
 @app.template_filter("data_br")
-def filter_data_br(data_str):
+@pass_context
+def filter_data_br(context, data_str):
     if not data_str:
         return ""
+    formato = context.get("global_config", {}).get("formato_data", "dd/mm/aaaa")
+    meses = [
+        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
+    ]
+    dias_semana = [
+        "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+        "sexta-feira", "sábado", "domingo"
+    ]
     try:
-        parts = data_str.split("-")
-        if len(parts) == 3:
-            return f"{parts[2]}/{parts[1]}/{parts[0]}"
-        elif len(parts) == 2:
-            return f"{parts[1]}/{parts[0]}"
+        partes = data_str.split("-")
+        if len(partes) == 3:
+            data = date.fromisoformat(data_str)
+            if formato == "extenso":
+                return f"{data.day} de {meses[data.month - 1]} de {data.year}"
+            if formato == "semana_extenso":
+                return f"{dias_semana[data.weekday()]}, {data.day} de {meses[data.month - 1]} de {data.year}"
+            return data.strftime("%d/%m/%Y")
+        if len(partes) == 2:
+            ano, mes = (int(parte) for parte in partes)
+            if formato == "dd/mm/aaaa":
+                return f"{mes:02d}/{ano:04d}"
+            return f"{meses[mes - 1]} de {ano}"
+    except (ValueError, TypeError, IndexError):
         return data_str
-    except Exception:
-        return data_str
+    return data_str
 
 @app.context_processor
 def inject_global_data():
@@ -57,11 +87,27 @@ def inject_global_data():
 @app.route("/")
 def index():
     """Dashboard principal com visão mensal, KPIs e gráficos."""
-    hoje = date.today()
-    ano_mes = request.args.get("mes", hoje.strftime("%Y-%m"))
+    agora = datetime.now()
+    hoje = agora.date()
+    preferencias = models.get_configuracoes()
+    mes_padrao = (
+        hoje.strftime("%Y-%m")
+        if preferencias["ano_ativo"] == hoje.year
+        else f"{preferencias['ano_ativo']}-01"
+    )
+    ano_mes = request.args.get("mes", mes_padrao)
+    try:
+        ano_mes = datetime.strptime(ano_mes, "%Y-%m").strftime("%Y-%m")
+    except ValueError:
+        ano_mes = mes_padrao
     resumo = models.get_resumo_mensal(ano_mes)
-    config = models.get_configuracoes()
+    config = models.get_configuracoes(int(ano_mes[:4]))
     cartoes = models.get_cartoes()
+    saudacao = (
+        "Bom dia" if 5 <= agora.hour < 12
+        else "Boa tarde" if 12 <= agora.hour < 18
+        else "Boa noite"
+    )
 
     # Próximo e anterior mês para navegação
     try:
@@ -79,7 +125,9 @@ def index():
         mes_ant=mes_ant,
         mes_prox=mes_prox,
         config=config,
-        cartoes=cartoes
+        cartoes=cartoes,
+        data_atual=hoje.isoformat(),
+        saudacao=saudacao
     )
 
 @app.route("/lancamentos")
@@ -470,8 +518,14 @@ def excluir_cartao(id):
 @app.route("/anual")
 def anual():
     """Visão anual com comparativo dos 12 meses por categoria e gráficos."""
-    hoje = date.today()
-    ano = int(request.args.get("ano", hoje.year))
+    config = models.get_configuracoes()
+    try:
+        ano = int(request.args.get("ano", config["ano_ativo"]))
+        if not 1 <= ano <= 9999:
+            raise ValueError("Informe um ano entre 1 e 9999.")
+    except ValueError as erro:
+        flash(f"Ano inválido: {erro}", "danger")
+        return redirect(url_for("anual"))
     dados_ano = models.get_visao_anual(ano)
 
     return render_template(
@@ -491,23 +545,54 @@ def configuracoes():
         "configuracoes.html",
         config=config,
         limites=limites,
-        cartoes=cartoes
+        cartoes=cartoes,
+        data_formats={
+            "dd/mm/aaaa": "dd/mm/aaaa",
+            "extenso": "Dia de mês de ano",
+            "semana_extenso": "Dia da semana, dia de mês de ano"
+        }
     )
 
 @app.route("/configuracoes/salvar", methods=["POST"])
 def salvar_configuracoes():
-    """Salva rendas mensais e saldos de patrimônio."""
+    """Salva renda do ano selecionado, saldos e preferências de exibição."""
     try:
-        salario = float(request.form.get("salario", 0).replace(",", "."))
-        outras_rendas = float(request.form.get("outras_rendas", 0).replace(",", "."))
-        saldo_cc = float(request.form.get("saldo_conta_corrente", 0).replace(",", "."))
-        valor_investido = float(request.form.get("valor_investido", 0).replace(",", "."))
+        ano = int(request.form.get("ano_ativo", date.today().year))
+        if not 1 <= ano <= 9999:
+            raise ValueError("Informe um ano válido.")
+        modo_renda = request.form.get("modo_renda", "mensal")
+        if modo_renda == "anual":
+            salario = float(str(request.form.get("salario_anual", "0")).replace(",", ".")) / 12
+            outras_rendas = float(str(request.form.get("outras_rendas_anuais", "0")).replace(",", ".")) / 12
+        else:
+            salario = float(str(request.form.get("salario_mensal", "0")).replace(",", "."))
+            outras_rendas = float(str(request.form.get("outras_rendas_mensais", "0")).replace(",", "."))
+        saldo_cc = float(str(request.form.get("saldo_conta_corrente", "0")).replace(",", "."))
+        valor_investido = float(str(request.form.get("valor_investido", "0")).replace(",", "."))
+        formato_data = request.form.get("formato_data", "dd/mm/aaaa")
+        if formato_data not in {"dd/mm/aaaa", "extenso", "semana_extenso"}:
+            raise ValueError("Selecione um formato de data válido.")
 
-        models.update_configuracoes(salario, outras_rendas, saldo_cc, valor_investido)
+        models.update_configuracoes(
+            salario, outras_rendas, saldo_cc, valor_investido, ano, formato_data
+        )
         flash("Configurações e saldos atualizados com sucesso!", "success")
     except Exception as e:
         flash(f"Erro ao salvar configurações: {str(e)}", "danger")
 
+    return redirect(url_for("configuracoes"))
+
+@app.route("/configuracoes/ano", methods=["POST"])
+def salvar_ano_ativo():
+    """Salva o ano de referência para o dashboard e para a renda anual."""
+    try:
+        ano = int(request.form.get("ano_ativo", ""))
+        if not 1 <= ano <= 9999:
+            raise ValueError("Informe um ano entre 1 e 9999.")
+        models.update_ano_ativo(ano)
+        flash(f"Ano de referência alterado para {ano}.", "success")
+    except (TypeError, ValueError) as erro:
+        flash(f"Não foi possível alterar o ano: {erro}", "danger")
     return redirect(url_for("configuracoes"))
 
 @app.route("/configuracoes/saldos", methods=["POST"])
@@ -657,6 +742,3 @@ if __name__ == "__main__":
         waitress.serve(app, host="127.0.0.1", port=5000, threads=6)
     except ImportError:
         app.run(debug=False, host="127.0.0.1", port=5000)
-
-
-

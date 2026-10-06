@@ -53,7 +53,7 @@
                 <label class="form-label small fw-bold text-muted">Método</label>
                 <select name="metodo" class="form-select">
                     <option value="">Todos</option>
-                    <option value="Conta Corrente" {% if filtro_metodo == 'Conta Corrente' %}selected{% endif %}>Conta Corrente</option>
+                    <option value="Cartão de Débito" {% if filtro_metodo == 'Cartão de Débito' %}selected{% endif %}>Cartão de Débito</option>
                     <option value="Pix" {% if filtro_metodo == 'Pix' %}selected{% endif %}>Pix</option>
                     <option value="Dinheiro" {% if filtro_metodo == 'Dinheiro' %}selected{% endif %}>Dinheiro</option>
                     {% for c in global_cartoes %}
@@ -222,7 +222,7 @@
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Método de Pagamento</label>
                             <select class="form-select" name="metodo_pagamento" id="edit_metodo_pagamento" required>
-                                <option value="Conta Corrente">Conta Corrente</option>
+                                <option value="Cartão de Débito">Cartão de Débito</option>
                                 <option value="Pix">Pix</option>
                                 <option value="Dinheiro">Dinheiro</option>
                                 <option value="Cartão de Crédito">Cartão de Crédito</option>
