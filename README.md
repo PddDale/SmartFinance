@@ -1,126 +1,100 @@
-# 🪙 SmartFinance - Sistema de Controle Financeiro Pessoal
+# SmartFinance
 
-Aplicação web profissional desenvolvida em **Python (Flask)** com servidor de produção **Waitress (WSGI)**, persistência em banco relacional leve **SQLite**, interface visual em **Design Monocromático de Alto Contraste (Preto, Branco e Cinza)** com **Aceleração por GPU**, componentes visuais responsivos (**Bootstrap 5.3**) e gráficos analíticos (**Chart.js**).
+### Mais clareza para cuidar do seu dinheiro, no seu ritmo.
 
----
+O SmartFinance é um aplicativo web de finanças pessoais para acompanhar gastos, cartões, parcelas e despesas recorrentes em um só lugar. Veja um resumo da sua vida financeira, registre movimentações e consulte seus gastos ao longo do ano — com os dados guardados localmente no seu computador.
 
-## 🌱 Propósito, código aberto e privacidade
+> **Privacidade:** O SmartFinance não se conecta a bancos nem envia seus dados financeiros a serviços de nuvem. A interface carrega alguns recursos visuais por CDNs externos, mas não envia seus lançamentos a esses serviços.
 
-O SmartFinance existe para ajudar cada pessoa a organizar as próprias finanças de forma simples, clara e independente. O projeto busca ser aberto à colaboração e à auditoria: qualquer pessoa pode estudar o código, sugerir melhorias e contribuir.
+## O que você pode fazer hoje
 
-- **Privacidade em primeiro lugar:** lançamentos, rendas, cartões e saldos são armazenados no SQLite local (`Recursos/Dados/finance.db`), no computador onde a aplicação é executada. O SmartFinance não envia esses dados financeiros para serviços de nuvem.
-- **Controle dos dados:** o banco de dados permanece com a pessoa usuária; a exportação JSON permite criar uma cópia de segurança.
-- **Simplicidade:** a aplicação deve ser fácil de iniciar e usar, sem exigir a criação manual de ambientes virtuais.
-- **Transparência:** mudanças e funcionalidades devem preservar a autonomia e a confidencialidade dos dados financeiros.
+- **Entender o panorama financeiro:** consulte indicadores de patrimônio, saldo, investimentos, gastos do mês e faturas em aberto.
+- **Acompanhar gastos do dia a dia:** registre lançamentos, organize-os por categoria e filtre por período, método de pagamento ou texto.
+- **Controlar cartões:** cadastre cartões e acompanhe compras e faturas conforme as datas de fechamento e vencimento.
+- **Planejar parcelas:** registre compras parceladas e consulte a projeção das parcelas.
+- **Lembrar despesas recorrentes:** acompanhe contas e assinaturas e pause ou reative seu controle mensal.
+- **Observar a evolução ao longo do ano:** compare os meses em uma visão anual com tabelas e gráficos.
+- **Guardar uma cópia dos dados:** exporte um backup em JSON.
 
-O navegador carrega Bootstrap, ícones, gráficos e fontes a partir de CDNs externos. Esses recursos visuais não recebem os dados financeiros da aplicação; para uso sem conexão ou sem requisições a CDNs, os assets podem ser hospedados localmente.
+## O que vem pela frente
 
----
+Estas são ideias para versões futuras; ainda não estão disponíveis no aplicativo. A ordem e o escopo podem mudar conforme o projeto evolui.
 
-## 🎨 Identidade Visual e Filosofia de Design
+- [ ] **Open Finance:** estudar uma integração de leitura de transações com um provedor adequado, incluindo custos, consentimento, segurança e armazenamento dos tokens. A proposta é mostrar uma prévia para revisão antes de importar e permitir revogar a conexão.
+- [ ] **Importar extratos CSV e OFX:** carregar arquivos exportados pelo banco, revisar as transações e identificar possíveis duplicatas antes de gravar.
+- [ ] **Contas bancárias:** organizar várias contas e visualizar saldos consolidados.
+- [ ] **Categorizar lançamentos com assistência:** sugerir categorias a partir das descrições, mantendo a possibilidade de revisar e corrigir as sugestões.
+- [ ] **Tema escuro:** oferecer uma alternativa de aparência com preferência salva.
+- [ ] **Mais idiomas:** ampliar o acesso com traduções para outros idiomas.
+- [ ] **Acompanhar investimentos:** explorar uma área para organizar investimentos e acompanhar sua evolução.
 
-- **Base Monocromática (Preto, Branco e Cinza):** Todo o corpo da aplicação, cabeçalhos, painéis e tabelas utilizam tons puros de preto, branco e cinza para uma interface limpa, sóbria e focada.
-- **Botões de Ação com Cores Vivas (Alto Contraste):** Apenas os botões de ação interativos possuem cores primárias sólidas (Azul para criação, Verde para salvar/superávit, Vermelho para exclusão/saída e Âmbar para ajustes), criando um contraste visual instantâneo e intuitivo.
-- **Aceleração por GPU & Alta Performance:**
-  - Eliminação de filtros Gaussianos pesados em favor de renderização direta com camadas aceleradas por hardware (`transform: translateZ(0)` e `backface-visibility: hidden`).
-  - Animações leves e rápidas no Chart.js para eliminar travamentos e quedas de quadros no Windows.
-- **Design dos Cartões de Crédito Preservado:** Visual dos cartões de crédito físicos/virtuais mantido com chip dourado, bandeiras e monitoramento de faturas.
-- **Opções de Encerramento (Salvar e Sair / Sair sem Salvar):** Botão dedicado no cabeçalho permitindo ao usuário escolher entre:
-  1. **Salvar e Sair:** Sincroniza e confirma todas as alterações pendentes no banco SQLite local antes de desligar o servidor e fechar a aba.
-  2. **Sair sem Salvar:** Encerra o servidor imediatamente sem gravar novas alterações pendentes.
+O SmartFinance ainda **não oferece conexão bancária automática**. A ideia para Open Finance é consultar transações somente após autorização da pessoa usuária — não realizar pagamentos. Uma integração desse tipo exigirá escolher um provedor e explicar com clareza quais dados são compartilhados e como são protegidos.
 
----
+## Como funciona
 
-## ⚡ Servidor de Produção WSGI (Waitress)
+O aplicativo é executado no seu computador e aberto pelo navegador. Ele usa Python e Flask na aplicação, SQLite para guardar os dados localmente e Waitress como servidor web. A interface usa HTML, CSS e JavaScript.
 
-A aplicação agora utiliza o servidor **Waitress**, um servidor WSGI pronto para produção em ambiente Windows que:
-- **Remove completamente o aviso:** `WARNING: This is a development server. Do not use it in a production deployment.`
-- Executa requisições de forma multithread (múltiplas threads simultâneas), eliminando gargalos de requisições travadas e melhorando significativamente o tempo de resposta e carregamento de assets.
+O arquivo do banco de dados fica em `Recursos/Dados/finance.db`. Faça backups regularmente e não compartilhe esse arquivo: ele pode conter informações financeiras pessoais. A exportação JSON está disponível em **Configurações**.
 
----
+### Requisitos
 
-## 🚀 Principais Funcionalidades
+- Windows
+- Python disponível pelo comando `py`
+- Conexão com a internet na primeira execução para instalar dependências e carregar recursos visuais externos
 
-1. **Dashboard com KPIs:** Patrimônio Total, Saldo em Conta Corrente, Investimentos, Gastos do Mês e Faturas em Aberto.
-2. **Lançamentos Avulsos:** Controle de gastos diários com categorização e filtros por texto, mês, categoria e método de pagamento.
-3. **Múltiplos Cartões de Crédito:** Controle de datas de fechamento e vencimento com cálculo automático da alocação de compras na fatura correta.
-4. **Compras Parceladas:** Projeção cronológica das parcelas no banco de dados e cronograma visual com sanfona de detalhes.
-5. **Gastos Recorrentes:** Controle de contas fixas e assinaturas com chave de ativação/pausa mensal instantânea via AJAX.
-6. **Visão Anual:** Tabela comparativa dos 12 meses idêntica à do Excel e gráficos de evolução.
-7. **Exportação e Backup:** Download em um clique do arquivo `database.json`.
+### Política de dependências Python
 
----
+O SmartFinance não usa nem deve criar uma pasta `.venv` ou outro ambiente virtual dentro do projeto. O inicializador e as instruções de instalação usam o Python selecionado pelo comando `py` e instalam os pacotes listados em `Recursos\Dependencias\requirements.txt` no local padrão desse Python, para que outros projetos que usem a mesma instalação também possam aproveitar os pacotes.
 
-## 🗂️ Organização dos arquivos
+Ao atualizar o projeto, mantenha esse comportamento: não direcione a instalação para uma pasta local do repositório nem adicione a criação automática de um ambiente virtual. Como a instalação é compartilhada, atualizar pacotes pode afetar outros projetos que usem essa mesma instalação do Python; em alguns computadores, também pode ser necessário ter permissão para instalar pacotes.
 
-A raiz do projeto mantém somente os arquivos de entrada e orientação. Os componentes técnicos ficam agrupados por tipo dentro de `Recursos`:
+### Início rápido
 
-```text
-SmartFinance/
-├── SmartFinance.bat          # Inicialização em um clique no Windows
-├── README.md                 # Apresentação, instruções e documentação
-├── .gitignore                # Exclusões do Git, incluindo dados pessoais
-└── Recursos/
-    ├── Codigo/               # Aplicação Flask, modelos e banco de dados
-    ├── Interface/            # Templates HTML, CSS e JavaScript
-    ├── Dependencias/         # Lista de pacotes Python
-    ├── Testes/               # Testes automatizados
-    └── Dados/                # Banco SQLite local (criado automaticamente)
-```
+Na raiz do projeto, dê um duplo clique em `SmartFinance.bat`. O script prepara as dependências e abre o aplicativo no navegador em `http://127.0.0.1:5000`.
 
-O diretório `Recursos/Dados` guarda informações financeiras locais e é ignorado pelo Git. Não compartilhe nem publique o banco de dados pessoal.
+### Iniciar pelo terminal
 
----
+No PowerShell ou Prompt de Comando, a partir da raiz do projeto:
 
-## 🛠️ Como Executar
-
-### Opção 1: Inicialização em 1 Clique (Recomendado)
-Dê um duplo clique no arquivo **`SmartFinance.bat`** na raiz do projeto:
-```cmd
-SmartFinance.bat
-```
-O script iniciará o servidor Waitress e abrirá seu navegador automaticamente em `http://127.0.0.1:5000`.
-Na primeira execução, ou quando uma dependência precisar de atualização, o script instala/atualiza globalmente no Python selecionado pelo comando `py` os pacotes listados em `Recursos\Dependencias\requirements.txt`. É necessária conexão com a internet. Se o Windows negar permissão de escrita na instalação do Python, execute `SmartFinance.bat` como administrador.
-
-### Opção 2: Linha de Comando (PowerShell)
 ```powershell
 py -m pip install --upgrade -r Recursos\Dependencias\requirements.txt
 py Recursos\Codigo\app.py
 ```
-Acesse: **[http://127.0.0.1:5000](http://127.0.0.1:5000)**
 
-No Prompt de Comando do Windows, use:
-```cmd
-py -m pip install --upgrade -r Recursos\Dependencias\requirements.txt
-py Recursos\Codigo\app.py
-```
-O `pip` instala/atualiza as dependências na instalação Python global selecionada por `py`; se houver erro de permissão, execute o terminal como administrador.
+Depois, abra [http://127.0.0.1:5000](http://127.0.0.1:5000) no navegador.
 
-### Executar os testes
+### Encerrar
 
-Na raiz do repositório, execute:
+Use o botão **Sair** na barra superior e escolha uma das opções apresentadas:
+
+- **Salvar e Sair** para salvar os dados e encerrar o aplicativo.
+- **Sair sem Salvar** para encerrar sem persistir as alterações pendentes.
+
+## Executar os testes
+
+Na raiz do projeto, execute:
+
 ```powershell
 py -m unittest discover -s Recursos\Testes -t . -p test_app.py
 ```
 
----
+## Estrutura do projeto
 
-## 🛑 Como Encerrar o Aplicativo
+```text
+SmartFinance/
+├── SmartFinance.bat
+├── README.md
+├── Recursos/
+│   ├── Codigo/          # Aplicação Flask, modelos e acesso ao banco
+│   ├── Interface/       # Templates, CSS e JavaScript
+│   ├── Dependencias/    # Dependências Python
+│   ├── Testes/          # Testes automatizados
+│   └── Dados/           # Banco SQLite local
+└── .gitignore
+```
 
-Clique no botão vermelho **Sair** no canto superior direito da barra de navegação:
-- Selecione **"Salvar e Sair"** para persistir os dados no banco SQLite e desligar o servidor.
-- Selecione **"Sair sem Salvar"** para finalizar o servidor sem persistir novas alterações.
+## Ideias, problemas e contribuições
 
----
+Encontrou um problema ou tem uma sugestão? Abra uma issue neste repositório descrevendo o que aconteceu ou como a ideia ajudaria. Contribuições são bem-vindas; para mudanças maiores, uma issue antes do pull request ajuda a alinhar a solução.
 
-## 🔮 Funcionalidades Futuras (Roadmap)
-
-As funcionalidades abaixo estão planejadas para versões futuras do SmartFinance:
-
-| # | Funcionalidade | Descrição |
-|---|---|---|
-| 1 | 🤖 **Auto-categorização com IA** | Classificação automática de lançamentos usando modelos de Inteligência Artificial (locais via Ollama/LM Studio ou na nuvem via OpenAI/Gemini), eliminando a necessidade de categorização manual. |
-| 2 | 🌙 **Dark Mode** | Tema escuro alternativo para reduzir a fadiga visual em ambientes com pouca luz, com alternância instantânea e persistência da preferência do usuário. |
-| 3 | 🌐 **Outros Idiomas (i18n)** | Suporte a internacionalização (Inglês, Espanhol e outros), permitindo que usuários de diferentes países utilizem o sistema em sua língua nativa. |
-| 4 | 🏦 **Contas Globais** | Gerenciamento de múltiplas contas bancárias (corrente, poupança, carteiras digitais), com visão consolidada do saldo e transferências entre contas. |
-| 5 | 📈 **Plataforma de Monitoramento de Investimentos** | Painel dedicado para acompanhamento de renda fixa, renda variável, FIIs e criptoativos, com cotações em tempo real, rentabilidade acumulada e comparativo com benchmarks (CDI, IBOV, IPCA). |
+Ao reportar um problema, não anexe extratos, credenciais, backups ou outros dados financeiros reais. Se precisar demonstrar um caso, use informações fictícias.

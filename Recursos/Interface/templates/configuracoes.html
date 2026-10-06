@@ -196,5 +196,123 @@
 
     </div>
 
+    <section class="card card-clean border-danger p-4 mt-4" aria-labelledby="titulo-excluir-dados">
+        <div class="d-flex align-items-start gap-3 mb-3">
+            <i class="bi bi-exclamation-triangle-fill text-danger fs-4" aria-hidden="true"></i>
+            <div>
+                <h2 class="h5 fw-bold text-danger mb-1" id="titulo-excluir-dados">Excluir dados financeiros</h2>
+                <p class="text-muted small mb-0">
+                    Apague lançamentos e parcelas de um período. Cartões, recorrências, rendas e configurações serão preservados.
+                    A exclusão é permanente; exporte um backup antes, se quiser guardar uma cópia.
+                </p>
+            </div>
+        </div>
+
+        <form action="{{ url_for('excluir_dados') }}" method="POST" id="form-excluir-dados">
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-md-4">
+                    <label for="tipo-exclusao" class="form-label fw-bold">O que deseja excluir?</label>
+                    <select class="form-select" id="tipo-exclusao" name="tipo" required>
+                        <option value="dia">Um dia</option>
+                        <option value="semana">Uma semana</option>
+                        <option value="mes">Um mês</option>
+                        <option value="ano">Um ano</option>
+                        <option value="todos">Todos os dados</option>
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-4" id="referencia-container">
+                    <label for="referencia-exclusao" class="form-label fw-bold" id="referencia-label">Data</label>
+                    <input class="form-control" id="referencia-exclusao" name="referencia" type="date"
+                           value="{{ global_hoje }}" required>
+                    <div class="form-text" id="referencia-ajuda">Exclui os lançamentos e parcelas desta data.</div>
+                </div>
+
+                <div class="col-12 col-md-4 d-none" id="confirmacao-container">
+                    <label for="confirmacao-exclusao" class="form-label fw-bold">Confirme a exclusão total</label>
+                    <input class="form-control" id="confirmacao-exclusao" name="confirmacao"
+                           type="text" autocomplete="off" placeholder="Digite EXCLUIR TUDO" disabled>
+                    <div class="form-text">Isso apaga também cartões, recorrências, rendas, saldos e limites personalizados.</div>
+                </div>
+
+                <div class="col-12">
+                    <div class="alert alert-danger py-2 mb-0 d-none" id="aviso-exclusao-total" role="alert">
+                        <strong>Atenção:</strong> todos os dados serão removidos. Saldos e rendas serão zerados;
+                        apenas as categorias padrão serão restauradas. Essa ação não pode ser desfeita.
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <button type="submit" class="btn-action btn-danger-action">
+                        <i class="bi bi-trash"></i> Excluir dados selecionados
+                    </button>
+                </div>
+            </div>
+        </form>
+    </section>
+
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(() => {
+    const tipo = document.getElementById("tipo-exclusao");
+    const referencia = document.getElementById("referencia-exclusao");
+    const referenciaContainer = document.getElementById("referencia-container");
+    const referenciaLabel = document.getElementById("referencia-label");
+    const referenciaAjuda = document.getElementById("referencia-ajuda");
+    const confirmacaoContainer = document.getElementById("confirmacao-container");
+    const confirmacao = document.getElementById("confirmacao-exclusao");
+    const avisoTotal = document.getElementById("aviso-exclusao-total");
+    const formulario = document.getElementById("form-excluir-dados");
+    const referenciasPadrao = {
+        dia: "{{ global_hoje }}",
+        semana: "{{ global_hoje }}",
+        mes: "{{ global_hoje[:7] }}",
+        ano: "{{ global_hoje[:4] }}"
+    };
+
+    function atualizarCampos() {
+        const escopo = tipo.value;
+        const excluirTudo = escopo === "todos";
+        referenciaContainer.classList.toggle("d-none", excluirTudo);
+        confirmacaoContainer.classList.toggle("d-none", !excluirTudo);
+        avisoTotal.classList.toggle("d-none", !excluirTudo);
+        referencia.disabled = excluirTudo;
+        referencia.required = !excluirTudo;
+        confirmacao.disabled = !excluirTudo;
+        confirmacao.required = excluirTudo;
+
+        if (excluirTudo) return;
+
+        const tipoCampo = escopo === "mes" ? "month"
+            : escopo === "ano" ? "number" : "date";
+        if (referencia.type !== tipoCampo) {
+            referencia.type = tipoCampo;
+            referencia.value = referenciasPadrao[escopo];
+        }
+        referencia.min = escopo === "ano" ? "1" : "";
+        referencia.max = escopo === "ano" ? "9999" : "";
+        referenciaLabel.textContent = escopo === "mes" ? "Mês"
+            : escopo === "ano" ? "Ano"
+            : escopo === "semana" ? "Escolha um dia da semana" : "Data";
+        referenciaAjuda.textContent = escopo === "semana"
+            ? "A semana vai de segunda-feira a domingo."
+            : escopo === "mes" ? "Exclui lançamentos e parcelas com datas neste mês."
+            : escopo === "ano" ? "Exclui lançamentos e parcelas com datas neste ano."
+            : "Exclui os lançamentos e parcelas desta data.";
+    }
+
+    tipo.addEventListener("change", atualizarCampos);
+    formulario.addEventListener("submit", (evento) => {
+        const mensagem = tipo.value === "todos"
+            ? "Confirma excluir todos os dados financeiros, incluindo cartões, rendas e saldos? Esta ação não pode ser desfeita."
+            : "Confirma excluir os lançamentos e parcelas do período selecionado? Esta ação não pode ser desfeita.";
+        if (!window.confirm(mensagem)) evento.preventDefault();
+    });
+    atualizarCampos();
+})();
+</script>
 {% endblock %}

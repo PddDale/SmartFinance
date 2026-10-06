@@ -253,9 +253,14 @@ def parcelas():
     compras = models.get_compras_parceladas()
     hoje = date.today().strftime("%Y-%m")
 
-    # Calcular totais
-    total_em_parcelas = sum(c["valor_total"] - c["entrada"] for c in compras)
-    total_ja_pago = sum(c["valor_pago"] for c in compras)
+    # Basear os totais nas parcelas ainda registradas, que podem ser excluídas por período.
+    parcelas_registradas = [parcela for compra in compras for parcela in compra["parcelas"]]
+    total_em_parcelas = sum(float(parcela["valor"]) for parcela in parcelas_registradas)
+    total_ja_pago = sum(
+        float(parcela["valor"])
+        for parcela in parcelas_registradas
+        if parcela["status"] == "Pago"
+    )
     saldo_devedor_total = total_em_parcelas - total_ja_pago
 
     return render_template(
@@ -624,6 +629,46 @@ def salvar_limites_categoria():
         flash("Limites por categoria atualizados com sucesso!", "success")
     except Exception as e:
         flash(f"Erro ao atualizar limites: {str(e)}", "danger")
+
+    return redirect(url_for("configuracoes"))
+
+@app.route("/configuracoes/excluir-dados", methods=["POST"])
+def excluir_dados():
+    """Remove movimentações de um período ou limpa todos os dados financeiros."""
+    tipo = request.form.get("tipo", "")
+    try:
+        if tipo == "todos":
+            if request.form.get("confirmacao", "").strip() != "EXCLUIR TUDO":
+                raise ValueError("Digite EXCLUIR TUDO para confirmar a limpeza completa.")
+            models.excluir_todos_dados()
+            flash(
+                "Todos os dados financeiros foram excluídos. "
+                "Saldos e rendas foram zerados; categorias padrão foram restauradas.",
+                "success",
+            )
+        elif tipo in {"dia", "semana", "mes", "ano"}:
+            resultado = models.excluir_dados_periodo(
+                tipo, request.form.get("referencia", "")
+            )
+            periodo = (
+                resultado["inicio"].strftime("%d/%m/%Y")
+                if resultado["inicio"] == resultado["fim"]
+                else f"{resultado['inicio'].strftime('%d/%m/%Y')} a "
+                     f"{resultado['fim'].strftime('%d/%m/%Y')}"
+            )
+            flash(
+                f"Exclusão concluída para {periodo}: "
+                f"{resultado['lancamentos']} lançamento(s) e "
+                f"{resultado['parcelas']} parcela(s) removidos.",
+                "success",
+            )
+        else:
+            raise ValueError("Selecione um tipo de período válido.")
+    except ValueError as erro:
+        flash(str(erro), "danger")
+    except Exception:
+        app.logger.exception("Erro ao excluir dados financeiros")
+        flash("Não foi possível excluir os dados. Nenhuma alteração foi confirmada.", "danger")
 
     return redirect(url_for("configuracoes"))
 

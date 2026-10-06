@@ -250,6 +250,237 @@ class TestSmartFinance(unittest.TestCase):
             )
         )
 
+    def test_16_exclusao_por_periodo_preserva_cadastros_e_outras_parcelas(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            with patch.object(
+                database, "DB_PATH", os.path.join(pasta, "finance.db")
+            ):
+                database.init_db()
+                conn = database.get_db_connection()
+                cartao_id = conn.execute("""
+                    INSERT INTO cartoes
+                        (nome, limite_total, fechamento_dia, vencimento_dia)
+                    VALUES ('Cartão de teste', 1000, 10, 20);
+                """).lastrowid
+                compra_id = conn.execute("""
+                    INSERT INTO compras_parceladas (
+                        descricao, data_compra, valor_total, entrada, num_parcelas,
+                        valor_parcela, categoria, metodo_pagamento, cartao_id,
+                        mes_inicio, mes_fim
+                    ) VALUES (
+                        'Compra de teste', '2026-10-01', 300, 0, 3, 100,
+                        'Outros', 'Cartão de Crédito', ?, '2026-10', '2026-12'
+                    );
+                """, (cartao_id,)).lastrowid
+                conn.executemany("""
+                    INSERT INTO parcelas_detalhe (
+                        compra_id, numero_parcela, total_parcelas, ano_mes,
+                        valor, data_vencimento, status
+                    ) VALUES (?, ?, 3, ?, 100, ?, 'Pendente');
+                """, [
+                    (compra_id, 1, "2026-10", "2026-10-05"),
+                    (compra_id, 2, "2026-11", "2026-11-05"),
+                ])
+                conn.executemany("""
+                    INSERT INTO lancamentos (
+                        data, ano_mes, descricao, categoria, valor, metodo_pagamento
+                    ) VALUES (?, ?, ?, 'Outros', 10, 'Pix');
+                """, [
+                    ("2026-10-05", "2026-10", "Excluir"),
+                    ("2026-10-06", "2026-10", "Preservar"),
+                ])
+                conn.execute("""
+                    INSERT INTO gastos_recorrentes (descricao, valor_mensal, categoria)
+                    VALUES ('Assinatura de teste', 20, 'Outros');
+                """)
+                conn.execute("""
+                    UPDATE configuracoes
+                    SET saldo_conta_corrente = 1234, valor_investido = 5678
+                    WHERE id = 1;
+                """)
+                conn.commit()
+                conn.close()
+
+                response = self.app.post(
+                    "/configuracoes/excluir-dados",
+                    data={"tipo": "dia", "referencia": "data-invalida"},
+                )
+                self.assertEqual(response.status_code, 302)
+
+                response = self.app.post(
+                    "/configuracoes/excluir-dados",
+                    data={"tipo": "dia", "referencia": "2026-10-05"},
+                )
+                self.assertEqual(response.status_code, 302)
+
+                conn = database.get_db_connection()
+                self.assertEqual(
+                    [tuple(row) for row in conn.execute(
+                        "SELECT descricao FROM lancamentos;"
+                    ).fetchall()],
+                    [("Preservar",)],
+                )
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM parcelas_detalhe;").fetchone()[0],
+                    1,
+                )
+                self.assertIsNotNone(conn.execute(
+                    "SELECT id FROM compras_parceladas WHERE id = ?;", (compra_id,)
+                ).fetchone())
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM cartoes;").fetchone()[0], 1)
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM gastos_recorrentes;").fetchone()[0],
+                    1,
+                )
+                config = conn.execute(
+                    "SELECT saldo_conta_corrente, valor_investido "
+                    "FROM configuracoes WHERE id = 1;"
+                ).fetchone()
+                conn.close()
+                self.assertEqual(tuple(config), (1234, 5678))
+
+    def test_17_exclusao_total_apaga_dados_e_zera_saldos(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            with patch.object(
+                database, "DB_PATH", os.path.join(pasta, "finance.db")
+            ):
+                database.init_db()
+                conn = database.get_db_connection()
+                conn.execute("""
+                    INSERT INTO cartoes
+                        (nome, limite_total, fechamento_dia, vencimento_dia)
+                    VALUES ('Cartão de teste', 1000, 10, 20);
+                """)
+                conn.execute("""
+                    INSERT INTO lancamentos (
+                        data, ano_mes, descricao, categoria, valor, metodo_pagamento
+                    ) VALUES ('2026-10-05', '2026-10', 'Gasto de teste', 'Outros', 10, 'Pix');
+                """)
+                conn.execute("""
+                    INSERT INTO gastos_recorrentes (descricao, valor_mensal, categoria)
+                    VALUES ('Assinatura de teste', 20, 'Outros');
+                """)
+                conn.execute("""
+                    UPDATE configuracoes
+                    SET salario = 5000, outras_rendas = 500,
+                        saldo_conta_corrente = 1234, valor_investido = 5678
+                    WHERE id = 1;
+                """)
+                conn.commit()
+                conn.close()
+
+                resposta_sem_confirmacao = self.app.post(
+                    "/configuracoes/excluir-dados",
+                    data={"tipo": "todos"},
+                )
+                self.assertEqual(resposta_sem_confirmacao.status_code, 302)
+                conn = database.get_db_connection()
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM lancamentos;").fetchone()[0], 1)
+                conn.close()
+
+                response = self.app.post(
+                    "/configuracoes/excluir-dados",
+                    data={"tipo": "todos", "confirmacao": "EXCLUIR TUDO"},
+                )
+                self.assertEqual(response.status_code, 302)
+
+                conn = database.get_db_connection()
+                for tabela in (
+                    "lancamentos",
+                    "parcelas_detalhe",
+                    "compras_parceladas",
+                    "recorrentes_status_mes",
+                    "gastos_recorrentes",
+                    "cartoes",
+                ):
+                    with self.subTest(tabela=tabela):
+                        self.assertEqual(
+                            conn.execute(f"SELECT COUNT(*) FROM {tabela};").fetchone()[0],
+                            0,
+                        )
+                config = conn.execute("""
+                    SELECT salario, outras_rendas, saldo_conta_corrente, valor_investido
+                    FROM configuracoes WHERE id = 1;
+                """).fetchone()
+                self.assertEqual(tuple(config), (0, 0, 0, 0))
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM rendas_anuais;").fetchone()[0],
+                    1,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM limites_categoria WHERE limite_mensal != 0;"
+                    ).fetchone()[0],
+                    0,
+                )
+                conn.close()
+
+    def test_18_exclusao_por_semana_mes_e_ano_respeita_limites(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            with patch.object(
+                database, "DB_PATH", os.path.join(pasta, "finance.db")
+            ):
+                database.init_db()
+                conn = database.get_db_connection()
+                conn.executemany("""
+                    INSERT INTO lancamentos (
+                        data, ano_mes, descricao, categoria, valor, metodo_pagamento
+                    ) VALUES (?, ?, ?, 'Outros', 10, 'Pix');
+                """, [
+                    ("2026-10-05", "2026-10", "Segunda"),
+                    ("2026-10-11", "2026-10", "Domingo"),
+                    ("2026-10-12", "2026-10", "Semana seguinte"),
+                    ("2026-11-01", "2026-11", "Mês seguinte"),
+                    ("2027-01-01", "2027-01", "Ano seguinte"),
+                ])
+                conn.commit()
+                conn.close()
+
+                response = self.app.post(
+                    "/configuracoes/excluir-dados",
+                    data={"tipo": "semana", "referencia": "2026-10-07"},
+                )
+                self.assertEqual(response.status_code, 302)
+                conn = database.get_db_connection()
+                restantes = {
+                    row["descricao"] for row in conn.execute(
+                        "SELECT descricao FROM lancamentos;"
+                    ).fetchall()
+                }
+                conn.close()
+                self.assertEqual(
+                    restantes,
+                    {"Semana seguinte", "Mês seguinte", "Ano seguinte"},
+                )
+
+                response = self.app.post(
+                    "/configuracoes/excluir-dados",
+                    data={"tipo": "mes", "referencia": "2026-11"},
+                )
+                self.assertEqual(response.status_code, 302)
+                conn = database.get_db_connection()
+                restantes = {
+                    row["descricao"] for row in conn.execute(
+                        "SELECT descricao FROM lancamentos;"
+                    ).fetchall()
+                }
+                conn.close()
+                self.assertEqual(restantes, {"Semana seguinte", "Ano seguinte"})
+
+                response = self.app.post(
+                    "/configuracoes/excluir-dados",
+                    data={"tipo": "ano", "referencia": "2026"},
+                )
+                self.assertEqual(response.status_code, 302)
+                conn = database.get_db_connection()
+                restantes = {
+                    row["descricao"] for row in conn.execute(
+                        "SELECT descricao FROM lancamentos;"
+                    ).fetchall()
+                }
+                conn.close()
+                self.assertEqual(restantes, {"Ano seguinte"})
+
 
 if __name__ == "__main__":
     unittest.main()

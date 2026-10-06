@@ -1,11 +1,11 @@
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import calendar
 import json
 if __package__:
-    from .database import get_db_connection, calcular_fatura_e_vencimento, gerar_parcelas_compra, add_months
+    from .database import CATEGORIAS_PADRAO, get_db_connection, calcular_fatura_e_vencimento, gerar_parcelas_compra, add_months
 else:
-    from database import get_db_connection, calcular_fatura_e_vencimento, gerar_parcelas_compra, add_months
+    from database import CATEGORIAS_PADRAO, get_db_connection, calcular_fatura_e_vencimento, gerar_parcelas_compra, add_months
 
 def formatar_moeda(valor):
     """Formata um float para padrão de moeda brasileira R$ 1.234,56."""
@@ -634,6 +634,114 @@ def delete_compra_parcelada(compra_id):
     cursor.execute("DELETE FROM compras_parceladas WHERE id = ?;", (compra_id,))
     conn.commit()
     conn.close()
+
+def excluir_dados_periodo(tipo, referencia):
+    """Remove lançamentos e parcelas com datas dentro do período selecionado."""
+    if tipo not in {"dia", "semana", "mes", "ano"}:
+        raise ValueError("Selecione um período válido.")
+
+    try:
+        if tipo == "dia":
+            inicio = date.fromisoformat(referencia)
+            if inicio.isoformat() != referencia:
+                raise ValueError
+            fim = inicio
+        elif tipo == "semana":
+            inicio = date.fromisoformat(referencia)
+            if inicio.isoformat() != referencia:
+                raise ValueError
+            inicio -= timedelta(days=inicio.weekday())
+            fim = inicio + timedelta(days=6)
+        elif tipo == "mes":
+            inicio = date.fromisoformat(f"{referencia}-01")
+            if inicio.strftime("%Y-%m") != referencia:
+                raise ValueError
+            fim = date(inicio.year, inicio.month, calendar.monthrange(inicio.year, inicio.month)[1])
+        elif tipo == "ano":
+            if len(referencia) != 4 or not referencia.isdigit():
+                raise ValueError
+            ano = int(referencia)
+            if not 1 <= ano <= 9999:
+                raise ValueError
+            inicio = date(ano, 1, 1)
+            fim = date(ano, 12, 31)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("Informe uma data válida para o período selecionado.") from None
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "DELETE FROM lancamentos WHERE data BETWEEN ? AND ?;",
+            (inicio.isoformat(), fim.isoformat()),
+        )
+        lancamentos_excluidos = cursor.rowcount
+        cursor.execute(
+            "DELETE FROM parcelas_detalhe WHERE data_vencimento BETWEEN ? AND ?;",
+            (inicio.isoformat(), fim.isoformat()),
+        )
+        parcelas_excluidas = cursor.rowcount
+        cursor.execute("""
+            DELETE FROM compras_parceladas
+            WHERE NOT EXISTS (
+                SELECT 1 FROM parcelas_detalhe
+                WHERE parcelas_detalhe.compra_id = compras_parceladas.id
+            );
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return {
+        "lancamentos": lancamentos_excluidos,
+        "parcelas": parcelas_excluidas,
+        "inicio": inicio,
+        "fim": fim,
+    }
+
+def excluir_todos_dados():
+    """Apaga os dados financeiros e restaura configurações iniciais sem valores pessoais."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        for tabela in (
+            "recorrentes_status_mes",
+            "parcelas_detalhe",
+            "lancamentos",
+            "compras_parceladas",
+            "gastos_recorrentes",
+            "cartoes",
+            "rendas_anuais",
+            "configuracoes",
+            "limites_categoria",
+        ):
+            cursor.execute(f"DELETE FROM {tabela};")
+
+        ano_atual = date.today().year
+        cursor.execute("""
+            INSERT INTO configuracoes (
+                id, salario, outras_rendas, saldo_conta_corrente, valor_investido,
+                data_atualizacao, ano_ativo, formato_data
+            ) VALUES (1, 0, 0, 0, 0, datetime('now', 'localtime'), ?, 'dd/mm/aaaa');
+        """, (ano_atual,))
+        cursor.execute("""
+            INSERT INTO rendas_anuais (
+                ano, salario_mensal, outras_rendas_mensais, data_atualizacao
+            ) VALUES (?, 0, 0, datetime('now', 'localtime'));
+        """, (ano_atual,))
+        cursor.executemany("""
+            INSERT INTO limites_categoria (categoria, limite_mensal, icone, cor)
+            VALUES (?, 0, ?, ?);
+        """, [(categoria, icone, cor) for categoria, _, icone, cor in CATEGORIAS_PADRAO])
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def get_compras_parceladas():
     """Retorna todas as compras parceladas com resumo de quitação."""
