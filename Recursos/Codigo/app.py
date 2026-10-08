@@ -1,9 +1,13 @@
 import os
 from datetime import datetime, date
 import json
+import io
+import re
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Response
 from jinja2 import pass_context
+from werkzeug.exceptions import RequestEntityTooLarge
 
 if __package__:
     from . import database, models
@@ -19,6 +23,16 @@ app = Flask(
     static_folder=str(RESOURCE_DIR / "Interface" / "static")
 )
 app.secret_key = "controle-financeiro-segredo-super-seguro"
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
+@app.errorhandler(RequestEntityTooLarge)
+def arquivo_muito_grande(_erro):
+    if request.path.startswith("/lancamentos/importar"):
+        return jsonify({
+            "success": False,
+            "error": "O arquivo excede o limite de 10 MB.",
+        }), 413
+    return "A requisição excede o limite de tamanho permitido.", 413
 
 # Inicializar banco de dados se necessário
 database.init_db()
@@ -26,6 +40,12 @@ database.init_db()
 @app.template_filter("moeda")
 def filter_moeda(valor):
     return models.formatar_moeda(valor)
+
+@app.template_filter("decimal_br")
+def filter_decimal_br(valor):
+    if valor is None:
+        valor = 0
+    return f"{float(valor):.2f}".replace(".", ",")
 
 @app.template_filter("data_br")
 @pass_context
@@ -59,13 +79,112 @@ def filter_data_br(context, data_str):
         return data_str
     return data_str
 
+def parse_valor_localizado(valor):
+    """Converte valores em formato brasileiro ou internacional para float."""
+    texto = str(valor or "0").strip().replace("R$", "").replace(" ", "")
+    if not texto:
+        return 0.0
+    if "," in texto and "." in texto:
+        if texto.rfind(",") > texto.rfind("."):
+            texto = texto.replace(".", "").replace(",", ".")
+        else:
+            texto = texto.replace(",", "")
+    elif "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"-?\d{1,3}(?:\.\d{3})+", texto):
+        texto = texto.replace(".", "")
+    try:
+        resultado = Decimal(texto)
+    except InvalidOperation:
+        raise ValueError(f"Valor monetário inválido: {valor}") from None
+    if not resultado.is_finite():
+        raise ValueError("Informe um valor monetário finito.")
+    return float(resultado)
+
+def parse_valor_importacao(valor, formato_decimal):
+    """Converte um valor da planilha usando o formato decimal selecionado."""
+    if formato_decimal == "auto":
+        return parse_valor_localizado(valor)
+    if formato_decimal not in {"brasileiro", "internacional"}:
+        raise ValueError("Selecione um padrão decimal válido.")
+
+    if isinstance(valor, (int, float, Decimal)) and not isinstance(valor, bool):
+        resultado = Decimal(str(valor))
+    else:
+        texto = str(valor or "").strip().replace("R$", "").replace(" ", "")
+        if not texto:
+            raise ValueError("Valor monetário vazio.")
+        if formato_decimal == "brasileiro":
+            padrao = r"-?(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d+)?"
+            texto_normalizado = texto.replace(".", "").replace(",", ".")
+        else:
+            padrao = r"-?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?"
+            texto_normalizado = texto.replace(",", "")
+        if not re.fullmatch(padrao, texto):
+            nome_formato = (
+                "brasileiro (1.234,56)"
+                if formato_decimal == "brasileiro"
+                else "internacional (1,234.56)"
+            )
+            raise ValueError(f"Valor inválido para o padrão {nome_formato}: {valor}")
+        resultado = Decimal(texto_normalizado)
+
+    if not resultado.is_finite():
+        raise ValueError("Informe um valor monetário finito.")
+    return float(resultado)
+
+def _normalizar_categoria_importada(valor):
+    return "".join(
+        caractere.casefold() for caractere in str(valor or "")
+        if caractere.isalnum()
+    )
+
+def _ler_planilha_excel(arquivo):
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(io.BytesIO(arquivo), read_only=True, data_only=True)
+    planilha = workbook.active
+    if planilha is None:
+        workbook.close()
+        raise ValueError("O arquivo não contém uma aba de planilha.")
+    linhas = planilha.iter_rows(values_only=True)
+    cabecalhos = next(linhas, None)
+    if not cabecalhos:
+        workbook.close()
+        raise ValueError("A planilha está vazia ou não possui cabeçalho.")
+    colunas = [
+        {"indice": indice, "nome": str(nome).strip() if nome is not None else ""}
+        for indice, nome in enumerate(cabecalhos)
+    ]
+    registros = [tuple(linha) for linha in linhas]
+    workbook.close()
+    return colunas, registros
+
+def _data_excel_para_iso(valor):
+    if isinstance(valor, datetime):
+        return valor.date().isoformat()
+    if isinstance(valor, date):
+        return valor.isoformat()
+    texto = str(valor or "").strip()
+    if not texto:
+        raise ValueError("data vazia")
+    try:
+        return date.fromisoformat(texto).isoformat()
+    except ValueError:
+        for formato in ("%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(texto, formato).date().isoformat()
+            except ValueError:
+                continue
+    raise ValueError("data inválida (use dd/mm/aaaa)")
+
 @app.context_processor
 def inject_global_data():
     """Injeta dados comuns em todas as páginas (KPIs de patrimônio, cartões, categorias)."""
     hoje = date.today()
     mes_atual = hoje.strftime("%Y-%m")
     ano_atual = hoje.year
-    config = models.get_configuracoes()
+    config = models.get_configuracoes(ano_atual, mes_atual)
     cartoes = models.get_cartoes()
     categorias = models.get_limites_categoria()
 
@@ -101,7 +220,7 @@ def index():
     except ValueError:
         ano_mes = mes_padrao
     resumo = models.get_resumo_mensal(ano_mes)
-    config = models.get_configuracoes(int(ano_mes[:4]))
+    config = models.get_configuracoes(int(ano_mes[:4]), ano_mes)
     cartoes = models.get_cartoes()
     saudacao = (
         "Bom dia" if 5 <= agora.hour < 12
@@ -173,22 +292,191 @@ def lancamentos():
         query += " AND (LOWER(l.descricao) LIKE ? OR LOWER(l.observacao) LIKE ?)"
         params.extend([f"%{filtro_busca}%", f"%{filtro_busca}%"])
 
-    query += " ORDER BY l.data DESC, l.id DESC LIMIT 300;"
+    query += " ORDER BY date(l.data) DESC, l.id DESC LIMIT 300;"
     cursor.execute(query, params)
     itens = [dict(r) for r in cursor.fetchall()]
     conn.close()
 
     total_filtrado = sum(float(i["valor"]) for i in itens)
+    pagamentos_pendentes = models.get_pagamentos_recorrentes_pendentes(hoje)
+    grupos_pagamentos_recorrentes = {}
+    for pagamento in pagamentos_pendentes:
+        grupos_pagamentos_recorrentes.setdefault(
+            pagamento["id"], []
+        ).append(pagamento)
 
     return render_template(
         "lancamentos.html",
         lancamentos=itens,
+        grupos_pagamentos_recorrentes=list(grupos_pagamentos_recorrentes.values()),
         total_filtrado=total_filtrado,
         filtro_mes=filtro_mes,
+        ano_filtro_mes=filtro_mes[:4] if filtro_mes else str(hoje.year),
         filtro_cat=filtro_cat,
         filtro_metodo=filtro_metodo,
         filtro_busca=filtro_busca
     )
+
+@app.route("/api/lancamentos/sugestoes")
+def sugestoes_lancamentos():
+    """Sugere descrições já usadas em lançamentos anteriores."""
+    termo = request.args.get("q", "").strip()
+    if not termo:
+        return jsonify({"sugestoes": []})
+
+    termo_escapado = (
+        termo.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    conn = database.get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT descricao
+        FROM lancamentos
+        WHERE descricao LIKE ? ESCAPE '\\'
+        ORDER BY data DESC, id DESC
+        LIMIT 100;
+    """, (f"{termo_escapado}%",))
+    sugestoes = list(dict.fromkeys(row["descricao"] for row in cursor.fetchall()))[:8]
+    conn.close()
+    return jsonify({"sugestoes": sugestoes})
+
+@app.route("/lancamentos/importar/previa", methods=["POST"])
+def previa_importacao_excel():
+    """Lê o cabeçalho e algumas linhas para a etapa de mapeamento do wizard."""
+    arquivo = request.files.get("arquivo")
+    if not arquivo or not arquivo.filename or not arquivo.filename.lower().endswith(".xlsx"):
+        return jsonify({"success": False, "error": "Selecione um arquivo Excel .xlsx."}), 400
+    try:
+        colunas, linhas = _ler_planilha_excel(arquivo.read())
+        amostras = [
+            [str(valor) if valor is not None else "" for valor in linha]
+            for linha in linhas if any(valor is not None for valor in linha)
+        ][:5]
+        if not any(coluna["nome"] for coluna in colunas):
+            raise ValueError("A primeira linha da planilha precisa conter os nomes das colunas.")
+        return jsonify({
+            "success": True,
+            "colunas": colunas,
+            "amostras": amostras,
+            "total_linhas": sum(1 for linha in linhas if any(v is not None for v in linha)),
+        })
+    except ValueError as erro:
+        return jsonify({"success": False, "error": str(erro)}), 400
+    except Exception:
+        app.logger.exception("Erro ao ler planilha Excel enviada para prévia")
+        return jsonify({"success": False, "error": "Não foi possível ler esse arquivo Excel."}), 400
+
+@app.route("/lancamentos/importar", methods=["POST"])
+def importar_excel():
+    """Valida todas as linhas mapeadas antes de gravar lançamentos em lote."""
+    arquivo = request.files.get("arquivo")
+    if not arquivo or not arquivo.filename or not arquivo.filename.lower().endswith(".xlsx"):
+        return jsonify({"success": False, "error": "Selecione um arquivo Excel .xlsx."}), 400
+    try:
+        colunas, linhas = _ler_planilha_excel(arquivo.read())
+        if len(linhas) > 20000:
+            raise ValueError("A planilha excede o limite de 20.000 linhas de dados.")
+        indices = {
+            campo: int(request.form.get(f"{campo}_col", "-1"))
+            for campo in ("data", "descricao", "valor")
+        }
+        categoria_col_texto = request.form.get("categoria_col", "")
+        categoria_col = (
+            int(categoria_col_texto) if categoria_col_texto.strip() else None
+        )
+        if len(set(indices.values())) != 3 or any(
+            indice < 0 or indice >= len(colunas) for indice in indices.values()
+        ):
+            raise ValueError("Selecione uma coluna diferente para data, nome da compra e preço.")
+        if categoria_col is not None and (
+            categoria_col < 0
+            or categoria_col >= len(colunas)
+            or categoria_col in indices.values()
+        ):
+            raise ValueError("Selecione uma coluna de categoria válida e diferente das demais.")
+
+        formato_decimal = request.form.get("formato_decimal", "auto")
+        if formato_decimal not in {"auto", "brasileiro", "internacional"}:
+            raise ValueError("Selecione um padrão decimal válido.")
+        categoria = request.form.get("categoria", "Outros")
+        metodo = request.form.get("metodo_pagamento", "Pix")
+        categorias_validas = {item["categoria"] for item in models.get_limites_categoria()}
+        categorias_por_nome = {
+            _normalizar_categoria_importada(item): item
+            for item in categorias_validas
+        }
+        if categoria_col is None and categoria not in categorias_validas:
+            raise ValueError("Selecione uma categoria válida.")
+        if metodo not in {"Cartão de Débito", "Pix", "Dinheiro", "Cartão de Crédito"}:
+            raise ValueError("Selecione um método de pagamento válido.")
+        cartao_id_texto = request.form.get("cartao_id", "")
+        cartao_id = (
+            int(cartao_id_texto)
+            if metodo == "Cartão de Crédito" and cartao_id_texto
+            else None
+        )
+        if metodo == "Cartão de Crédito" and not cartao_id:
+            raise ValueError("Selecione o cartão de crédito utilizado.")
+
+        registros = []
+        erros = []
+        for numero_linha, linha in enumerate(linhas, start=2):
+            if not any(valor is not None and str(valor).strip() for valor in linha):
+                continue
+            try:
+                descricao = str(linha[indices["descricao"]] or "").strip()
+                data_compra = _data_excel_para_iso(linha[indices["data"]])
+                valor = parse_valor_importacao(
+                    linha[indices["valor"]], formato_decimal
+                )
+                categoria_linha = categoria
+                if categoria_col is not None:
+                    categoria_planilha = str(linha[categoria_col] or "").strip()
+                    categoria_linha = categorias_por_nome.get(
+                        _normalizar_categoria_importada(categoria_planilha)
+                    )
+                    if not categoria_linha:
+                        raise ValueError(
+                            f"categoria inválida ou vazia: '{categoria_planilha}'"
+                        )
+                if not descricao:
+                    raise ValueError("nome da compra vazio")
+                if valor <= 0:
+                    raise ValueError("o preço precisa ser maior que zero")
+                registros.append({
+                    "data": data_compra,
+                    "descricao": descricao,
+                    "categoria": categoria_linha,
+                    "valor": valor,
+                    "metodo_pagamento": metodo,
+                    "cartao_id": cartao_id,
+                    "observacao": "Importado de planilha Excel",
+                })
+            except (IndexError, TypeError, ValueError) as erro:
+                erros.append(f"Linha {numero_linha}: {erro}")
+                if len(erros) == 10:
+                    break
+        if erros:
+            return jsonify({
+                "success": False,
+                "error": "A planilha tem dados que precisam ser corrigidos; nenhum lançamento foi importado.",
+                "erros": erros,
+            }), 400
+        if not registros:
+            raise ValueError("Não há linhas preenchidas para importar.")
+        models.importar_lancamentos(registros)
+        return jsonify({
+            "success": True,
+            "quantidade": len(registros),
+            "message": f"{len(registros)} lançamento(s) importado(s) com sucesso.",
+        })
+    except ValueError as erro:
+        return jsonify({"success": False, "error": str(erro)}), 400
+    except Exception:
+        app.logger.exception("Erro ao importar lançamentos da planilha Excel")
+        return jsonify({"success": False, "error": "Não foi possível importar a planilha."}), 400
 
 @app.route("/lancamentos/novo", methods=["POST"])
 def novo_lancamento():
@@ -197,7 +485,7 @@ def novo_lancamento():
         data_compra = request.form.get("data")
         descricao = request.form.get("descricao", "").strip()
         categoria = request.form.get("categoria")
-        valor = float(request.form.get("valor", 0).replace(",", "."))
+        valor = parse_valor_localizado(request.form.get("valor", 0))
         observacao = request.form.get("observacao", "").strip()
         metodo = request.form.get("metodo_pagamento")
         cartao_id = request.form.get("cartao_id")
@@ -222,7 +510,7 @@ def editar_lancamento(id):
         data_compra = request.form.get("data")
         descricao = request.form.get("descricao", "").strip()
         categoria = request.form.get("categoria")
-        valor = float(request.form.get("valor", 0).replace(",", "."))
+        valor = parse_valor_localizado(request.form.get("valor", 0))
         observacao = request.form.get("observacao", "").strip()
         metodo = request.form.get("metodo_pagamento")
         cartao_id = request.form.get("cartao_id")
@@ -278,8 +566,8 @@ def nova_compra_parcelada():
     try:
         descricao = request.form.get("descricao", "").strip()
         data_compra = request.form.get("data_compra")
-        valor_total = float(request.form.get("valor_total", 0).replace(",", "."))
-        entrada = float(request.form.get("entrada", 0).replace(",", ".")) if request.form.get("entrada") else 0.0
+        valor_total = parse_valor_localizado(request.form.get("valor_total", 0))
+        entrada = parse_valor_localizado(request.form.get("entrada", 0))
         num_parcelas = int(request.form.get("num_parcelas", 1))
         categoria = request.form.get("categoria")
         metodo = request.form.get("metodo_pagamento")
@@ -299,6 +587,43 @@ def nova_compra_parcelada():
 
     return redirect(url_for("parcelas"))
 
+@app.route("/parcelas/editar/<int:id>", methods=["POST"])
+def editar_compra_parcelada(id):
+    """Atualiza o cadastro de uma compra parcelada."""
+    try:
+        descricao = request.form.get("descricao", "").strip()
+        data_compra = request.form.get("data_compra", "")
+        valor_total = parse_valor_localizado(request.form.get("valor_total", 0))
+        entrada = parse_valor_localizado(request.form.get("entrada", 0))
+        num_parcelas = int(request.form.get("num_parcelas", 0))
+        categoria = request.form.get("categoria", "")
+        metodo = request.form.get("metodo_pagamento", "")
+        cartao_id_texto = request.form.get("cartao_id", "")
+        cartao_id = (
+            int(cartao_id_texto)
+            if cartao_id_texto and metodo == "Cartão de Crédito"
+            else None
+        )
+        observacao = request.form.get("observacao", "").strip()
+
+        categorias_validas = {
+            item["categoria"] for item in models.get_limites_categoria()
+        }
+        if categoria not in categorias_validas:
+            raise ValueError("Selecione uma categoria válida.")
+        models.update_compra_parcelada(
+            id, descricao, data_compra, valor_total, entrada, num_parcelas,
+            categoria, metodo, cartao_id, observacao,
+        )
+        flash("Compra parcelada atualizada com sucesso.", "success")
+    except (TypeError, ValueError) as erro:
+        flash(f"Não foi possível atualizar a compra parcelada: {erro}", "danger")
+    except Exception as erro:
+        app.logger.exception("Erro ao atualizar compra parcelada %s", id)
+        flash(f"Não foi possível atualizar a compra parcelada: {erro}", "danger")
+
+    return redirect(url_for("parcelas"))
+
 @app.route("/parcelas/excluir/<int:id>", methods=["POST"])
 def excluir_compra_parcelada(id):
     """Exclui compra parcelada e todas as suas projeções."""
@@ -310,32 +635,62 @@ def excluir_compra_parcelada(id):
 
     return redirect(url_for("parcelas"))
 
+@app.route("/parcelas/<int:id>/pagar", methods=["POST"])
+def pagar_parcela(id):
+    """Registra o pagamento mensal de uma parcela."""
+    try:
+        metodo = request.form.get("metodo_pagamento", "")
+        cartao_id = request.form.get("cartao_id")
+        cid = int(cartao_id) if cartao_id and metodo == "Cartão de Crédito" else None
+        models.registrar_pagamento_parcela(id, metodo, cid)
+        flash("Pagamento da parcela registrado nos lançamentos.", "success")
+    except Exception as erro:
+        flash(f"Não foi possível registrar o pagamento: {erro}", "danger")
+    return redirect(request.referrer or url_for("parcelas"))
+
+@app.route("/parcelas/<int:id>/desfazer-pagamento", methods=["POST"])
+def desfazer_pagamento_parcela(id):
+    """Reabre parcela paga e remove o lançamento gerado por ela."""
+    try:
+        models.desfazer_pagamento_parcela(id)
+        flash("Pagamento desfeito; parcela voltou a ficar pendente.", "success")
+    except Exception as erro:
+        flash(f"Não foi possível desfazer o pagamento: {erro}", "danger")
+    return redirect(request.referrer or url_for("parcelas"))
+
 @app.route("/recorrentes")
 def recorrentes():
-    """Página de gerenciamento de gastos recorrentes (assinaturas e contas fixas)."""
+    """Página anual de gerenciamento de gastos recorrentes e assinaturas."""
     hoje = date.today()
-    ano_mes = request.args.get("mes", hoje.strftime("%Y-%m"))
+    try:
+        ano = int(request.args.get("ano", hoje.year))
+        if not 1 <= ano <= 9999:
+            raise ValueError
+    except ValueError:
+        flash("Selecione um ano válido.", "danger")
+        return redirect(url_for("recorrentes"))
 
-    conn = database.get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT r.*, ct.nome as cartao_nome, ct.cor as cartao_cor,
-               COALESCE(s.ativo, r.ativo_padrao) as status_mes
-        FROM gastos_recorrentes r
-        LEFT JOIN recorrentes_status_mes s ON r.id = s.recorrente_id AND s.ano_mes = ?
-        LEFT JOIN cartoes ct ON r.cartao_id = ct.id
-        ORDER BY r.dia_cobranca ASC, r.descricao ASC;
-    """, (ano_mes,))
-    itens = [dict(r) for r in cursor.fetchall()]
-    conn.close()
-
-    total_mensal_ativo = sum(float(i["valor_mensal"]) for i in itens if i["status_mes"] == 1)
+    itens = models.get_gastos_recorrentes_ano(ano)
+    total_anual_ativo = sum(
+        float(item["valor_mensal"])
+        * sum(
+            1
+            for mes in range(1, 13)
+            if f"{ano:04d}-{mes:02d}" >= item["mes_inicio"]
+            and item["status_meses"].get(
+                f"{ano:04d}-{mes:02d}", {}
+            ).get("ativo", bool(item["ativo_padrao"]))
+        )
+        for item in itens
+    )
 
     return render_template(
         "recorrentes.html",
         recorrentes=itens,
-        ano_mes=ano_mes,
-        total_mensal_ativo=total_mensal_ativo
+        ano=ano,
+        mes_inicio_padrao=hoje.strftime("%Y-%m"),
+        meses=range(1, 13),
+        total_anual_ativo=total_anual_ativo
     )
 
 @app.route("/recorrentes/novo", methods=["POST"])
@@ -343,20 +698,27 @@ def novo_recorrente():
     """Cadastra novo gasto recorrente."""
     try:
         descricao = request.form.get("descricao", "").strip()
-        valor_mensal = float(request.form.get("valor_mensal", 0).replace(",", "."))
+        valor_mensal = parse_valor_localizado(request.form.get("valor_mensal", 0))
         categoria = request.form.get("categoria")
         dia_cobranca = int(request.form.get("dia_cobranca", 5))
         metodo = request.form.get("metodo_pagamento")
         cartao_id = request.form.get("cartao_id")
+        mes_inicio = request.form.get(
+            "mes_inicio", date.today().strftime("%Y-%m")
+        )
 
         cid = int(cartao_id) if cartao_id and metodo == "Cartão de Crédito" else None
 
-        if not descricao or valor_mensal <= 0:
-            flash("Preencha descrição e um valor positivo.", "danger")
+        if not descricao or valor_mensal <= 0 or not 1 <= dia_cobranca <= 31:
+            flash("Preencha a descrição, um valor positivo e um dia entre 1 e 31.", "danger")
             return redirect(url_for("recorrentes"))
 
-        models.add_gasto_recorrente(descricao, valor_mensal, categoria, dia_cobranca, metodo, cid)
+        models.add_gasto_recorrente(
+            descricao, valor_mensal, categoria, dia_cobranca, metodo, cid,
+            mes_inicio,
+        )
         flash(f"Gasto recorrente '{descricao}' adicionado com sucesso!", "success")
+        return redirect(url_for("recorrentes", ano=mes_inicio[:4]))
     except Exception as e:
         flash(f"Erro ao salvar: {str(e)}", "danger")
 
@@ -367,12 +729,14 @@ def editar_recorrente(id):
     """Atualiza gasto recorrente."""
     try:
         descricao = request.form.get("descricao", "").strip()
-        valor_mensal = float(request.form.get("valor_mensal", 0).replace(",", "."))
+        valor_mensal = parse_valor_localizado(request.form.get("valor_mensal", 0))
         categoria = request.form.get("categoria")
         dia_cobranca = int(request.form.get("dia_cobranca", 5))
         metodo = request.form.get("metodo_pagamento")
         cartao_id = request.form.get("cartao_id")
 
+        if not descricao or valor_mensal <= 0 or not 1 <= dia_cobranca <= 31:
+            raise ValueError("Preencha descrição, valor positivo e um dia entre 1 e 31.")
         cid = int(cartao_id) if cartao_id and metodo == "Cartão de Crédito" else None
 
         models.update_gasto_recorrente(id, descricao, valor_mensal, categoria, dia_cobranca, metodo, cid)
@@ -407,12 +771,43 @@ def toggle_recorrente():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
+@app.route("/recorrentes/<int:id>/pagar", methods=["POST"])
+def pagar_recorrente(id):
+    """Registra o pagamento de uma recorrência no mês selecionado."""
+    ano_mes = request.form.get("ano_mes", "")
+    try:
+        metodo = request.form.get("metodo_pagamento", "")
+        cartao_id = request.form.get("cartao_id")
+        cid = int(cartao_id) if cartao_id and metodo == "Cartão de Crédito" else None
+        models.registrar_pagamento_recorrente(id, ano_mes, metodo, cid)
+        flash("Pagamento recorrente registrado nos lançamentos.", "success")
+    except Exception as erro:
+        flash(f"Não foi possível registrar o pagamento: {erro}", "danger")
+    return redirect(url_for("lancamentos"))
+
+@app.route("/recorrentes/<int:id>/desfazer-pagamento", methods=["POST"])
+def desfazer_pagamento_recorrente(id):
+    """Reabre recorrência paga e remove o lançamento gerado por ela."""
+    ano_mes = request.form.get("ano_mes", "")
+    try:
+        models.desfazer_pagamento_recorrente(id, ano_mes)
+        flash("Pagamento desfeito; recorrência voltou a ficar pendente.", "success")
+    except Exception as erro:
+        flash(f"Não foi possível desfazer o pagamento: {erro}", "danger")
+    try:
+        ano = int(ano_mes[:4])
+    except (TypeError, ValueError):
+        ano = date.today().year
+    return redirect(url_for("recorrentes", ano=ano))
+
 @app.route("/cartoes")
 def cartoes():
     """Página de múltiplos cartões de crédito com visualização de faturas e limites."""
     lista_cartoes = models.get_cartoes()
     hoje = date.today().strftime("%Y-%m")
     ano_mes = request.args.get("mes", hoje)
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", ano_mes):
+        ano_mes = hoje
 
     # Detalhamento de cada cartão para o mês selecionado
     conn = database.get_db_connection()
@@ -422,30 +817,40 @@ def cartoes():
         cid = c["id"]
         # Buscar compras avulsas desta fatura
         cursor.execute("""
-            SELECT * FROM lancamentos
-            WHERE cartao_id = ? AND mes_vencimento = ?
-            ORDER BY data DESC;
+            SELECT l.*, lim.cor as categoria_cor, lim.icone as categoria_icone
+            FROM lancamentos l
+            LEFT JOIN limites_categoria lim ON l.categoria = lim.categoria
+            WHERE l.cartao_id = ? AND l.mes_vencimento = ?
+            ORDER BY l.data DESC;
         """, (cid, ano_mes))
         c["itens_avulsos"] = [dict(r) for r in cursor.fetchall()]
 
         # Buscar parcelas desta fatura
         cursor.execute("""
-            SELECT p.*, cp.descricao as compra_descricao
+            SELECT p.*, cp.descricao as compra_descricao, cp.categoria,
+                   lim.cor as categoria_cor, lim.icone as categoria_icone
             FROM parcelas_detalhe p
             JOIN compras_parceladas cp ON p.compra_id = cp.id
-            WHERE cp.cartao_id = ? AND p.ano_mes = ?
+            LEFT JOIN limites_categoria lim ON cp.categoria = lim.categoria
+            WHERE cp.cartao_id = ? AND p.ano_mes = ? AND p.lancamento_id IS NULL
             ORDER BY p.data_vencimento ASC;
         """, (cid, ano_mes))
         c["itens_parcelas"] = [dict(r) for r in cursor.fetchall()]
 
         # Buscar assinaturas ativas neste cartão
         cursor.execute("""
-            SELECT r.*, COALESCE(s.ativo, r.ativo_padrao) as status_mes
+            SELECT r.*, lim.cor as categoria_cor, lim.icone as categoria_icone,
+                   COALESCE(s.ativo, r.ativo_padrao) as status_mes,
+                   COALESCE(s.pago, 0) as pago, s.lancamento_id
             FROM gastos_recorrentes r
             LEFT JOIN recorrentes_status_mes s ON r.id = s.recorrente_id AND s.ano_mes = ?
+            LEFT JOIN limites_categoria lim ON r.categoria = lim.categoria
             WHERE r.cartao_id = ?;
         """, (ano_mes, cid))
-        c["itens_recorrentes"] = [dict(r) for r in cursor.fetchall() if r["status_mes"] == 1]
+        c["itens_recorrentes"] = [
+            dict(r) for r in cursor.fetchall()
+            if r["status_mes"] == 1 and not r["lancamento_id"]
+        ]
 
         c["total_fatura_mes"] = round(
             sum(float(x["valor"]) for x in c["itens_avulsos"]) +
@@ -474,7 +879,7 @@ def novo_cartao():
     """Cadastra novo cartão de crédito."""
     try:
         nome = request.form.get("nome", "").strip()
-        limite_total = float(request.form.get("limite_total", 0).replace(",", "."))
+        limite_total = parse_valor_localizado(request.form.get("limite_total", 0))
         fechamento_dia = int(request.form.get("fechamento_dia", 25))
         vencimento_dia = int(request.form.get("vencimento_dia", 5))
         cor = request.form.get("cor", "#3b82f6")
@@ -496,7 +901,7 @@ def editar_cartao(id):
     """Edita dados do cartão de crédito."""
     try:
         nome = request.form.get("nome", "").strip()
-        limite_total = float(request.form.get("limite_total", 0).replace(",", "."))
+        limite_total = parse_valor_localizado(request.form.get("limite_total", 0))
         fechamento_dia = int(request.form.get("fechamento_dia", 25))
         vencimento_dia = int(request.form.get("vencimento_dia", 5))
         cor = request.form.get("cor", "#3b82f6")
@@ -536,7 +941,11 @@ def anual():
     return render_template(
         "anual.html",
         dados=dados_ano,
-        ano=ano
+        ano=ano,
+        cores_categorias={
+            categoria["categoria"]: categoria["cor"]
+            for categoria in models.get_limites_categoria()
+        },
     )
 
 @app.route("/configuracoes")
@@ -555,7 +964,11 @@ def configuracoes():
             "dd/mm/aaaa": "dd/mm/aaaa",
             "extenso": "Dia de mês de ano",
             "semana_extenso": "Dia da semana, dia de mês de ano"
-        }
+        },
+        meses_nomes=[
+            "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+        ],
     )
 
 @app.route("/configuracoes/salvar", methods=["POST"])
@@ -567,19 +980,40 @@ def salvar_configuracoes():
             raise ValueError("Informe um ano válido.")
         modo_renda = request.form.get("modo_renda", "mensal")
         if modo_renda == "anual":
-            salario = float(str(request.form.get("salario_anual", "0")).replace(",", ".")) / 12
-            outras_rendas = float(str(request.form.get("outras_rendas_anuais", "0")).replace(",", ".")) / 12
+            salario = parse_valor_localizado(request.form.get("salario_anual", "0")) / 12
+            outras_rendas = parse_valor_localizado(request.form.get("outras_rendas_anuais", "0")) / 12
         else:
-            salario = float(str(request.form.get("salario_mensal", "0")).replace(",", "."))
-            outras_rendas = float(str(request.form.get("outras_rendas_mensais", "0")).replace(",", "."))
-        saldo_cc = float(str(request.form.get("saldo_conta_corrente", "0")).replace(",", "."))
-        valor_investido = float(str(request.form.get("valor_investido", "0")).replace(",", "."))
+            salario = parse_valor_localizado(request.form.get("salario_mensal", "0"))
+            outras_rendas = parse_valor_localizado(request.form.get("outras_rendas_mensais", "0"))
+        saldo_cc = parse_valor_localizado(request.form.get("saldo_conta_corrente", "0"))
+        valor_investido = parse_valor_localizado(request.form.get("valor_investido", "0"))
+        renda_variavel_mensal = request.form.get("renda_variavel_mensal") == "1"
+        rendas_mensais = [
+            {
+                "salario": parse_valor_localizado(
+                    request.form.get(f"salario_mes_{mes:02d}", salario)
+                ),
+                "outras_rendas": parse_valor_localizado(
+                    request.form.get(f"outras_rendas_mes_{mes:02d}", outras_rendas)
+                ),
+            }
+            for mes in range(1, 13)
+        ]
+        valores_renda = [salario, outras_rendas]
+        valores_renda.extend(
+            valor
+            for renda in rendas_mensais
+            for valor in renda.values()
+        )
+        if any(valor < 0 for valor in valores_renda):
+            raise ValueError("Rendas devem ser iguais ou superiores a zero.")
         formato_data = request.form.get("formato_data", "dd/mm/aaaa")
         if formato_data not in {"dd/mm/aaaa", "extenso", "semana_extenso"}:
             raise ValueError("Selecione um formato de data válido.")
 
         models.update_configuracoes(
-            salario, outras_rendas, saldo_cc, valor_investido, ano, formato_data
+            salario, outras_rendas, saldo_cc, valor_investido, ano, formato_data,
+            renda_variavel_mensal, rendas_mensais,
         )
         flash("Configurações e saldos atualizados com sucesso!", "success")
     except Exception as e:
@@ -604,8 +1038,8 @@ def salvar_ano_ativo():
 def salvar_saldos_rapido():
     """Ajuste rápido de saldos (utilizado no modal do cabeçalho)."""
     try:
-        saldo_cc = float(request.form.get("saldo_conta_corrente", 0).replace(",", "."))
-        valor_investido = float(request.form.get("valor_investido", 0).replace(",", "."))
+        saldo_cc = parse_valor_localizado(request.form.get("saldo_conta_corrente", 0))
+        valor_investido = parse_valor_localizado(request.form.get("valor_investido", 0))
 
         models.update_saldos(saldo_cc, valor_investido)
         flash("Saldos e patrimônio atualizados!", "success")
@@ -619,12 +1053,17 @@ def salvar_limites_categoria():
     """Atualiza limites das categorias."""
     try:
         limites = models.get_limites_categoria()
+        novos_limites = []
         for l in limites:
             cat = l["categoria"]
             campo = f"limite_{cat}"
             if campo in request.form:
-                novo_limite = float(request.form.get(campo, 0).replace(",", "."))
-                models.update_limite_categoria(cat, novo_limite)
+                novo_limite = parse_valor_localizado(request.form.get(campo, 0))
+                if novo_limite < 0:
+                    raise ValueError("Os limites devem ser iguais ou superiores a zero.")
+                novos_limites.append((cat, novo_limite))
+        for cat, novo_limite in novos_limites:
+            models.update_limite_categoria(cat, novo_limite)
 
         flash("Limites por categoria atualizados com sucesso!", "success")
     except Exception as e:
@@ -650,11 +1089,16 @@ def excluir_dados():
             resultado = models.excluir_dados_periodo(
                 tipo, request.form.get("referencia", "")
             )
+            contexto_data = {
+                "global_config": {
+                    "formato_data": models.get_configuracoes()["formato_data"]
+                }
+            }
             periodo = (
-                resultado["inicio"].strftime("%d/%m/%Y")
+                filter_data_br(contexto_data, resultado["inicio"].isoformat())
                 if resultado["inicio"] == resultado["fim"]
-                else f"{resultado['inicio'].strftime('%d/%m/%Y')} a "
-                     f"{resultado['fim'].strftime('%d/%m/%Y')}"
+                else f"{filter_data_br(contexto_data, resultado['inicio'].isoformat())} a "
+                     f"{filter_data_br(contexto_data, resultado['fim'].isoformat())}"
             )
             flash(
                 f"Exclusão concluída para {periodo}: "
@@ -720,6 +1164,9 @@ def api_calcular_fatura():
             "fatura_mes": fatura_mes,
             "mes_vencimento": mes_venc,
             "data_vencimento": data_venc,
+            "data_vencimento_formatada": filter_data_br(
+                {"global_config": models.get_configuracoes()}, data_venc
+            ),
             "fechamento_dia": crow["fechamento_dia"],
             "vencimento_dia": crow["vencimento_dia"]
         })

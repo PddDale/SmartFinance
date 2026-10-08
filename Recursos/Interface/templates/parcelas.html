@@ -59,7 +59,13 @@
                                 <div>
                                     <h5 class="fw-bold text-dark mb-0">{{ c.descricao }}</h5>
                                     <div class="d-flex align-items-center gap-2 mt-1">
-                                        <span class="badge bg-light text-dark border">{{ c.categoria }}</span>
+                                        {% set cor = c.categoria_cor or '#6b7280' %}
+                                        {% set icone = c.categoria_icone or 'bi-tags' %}
+                                        <span class="cat-badge"
+                                              style="background-color: {{ cor }}18; border-color: {{ cor }}55; color: {{ cor }};">
+                                            <span class="cat-dot" style="background-color: {{ cor }};"></span>
+                                            <i class="bi {{ icone }}" aria-hidden="true"></i>{{ c.categoria }}
+                                        </span>
                                         <small class="text-muted">Comprado em: {{ c.data_compra | data_br }}</small>
                                     </div>
                                 </div>
@@ -96,6 +102,23 @@
                         <div class="col-6 col-sm-3 col-lg-2 text-end d-flex align-items-center justify-content-end gap-2">
                             <button class="btn btn-outline-dark btn-sm rounded-pill px-3" type="button" data-bs-toggle="collapse" data-bs-target="#detalhe-compra-{{ c.id }}">
                                 <i class="bi bi-list-nested me-1"></i>Parcelas
+                            </button>
+
+                            <button type="button" class="btn btn-outline-primary btn-sm rounded-pill"
+                                    title="Editar configuração da compra parcelada"
+                                    data-edit-compra-parcelada
+                                    data-edit-id="{{ c.id }}"
+                                    data-edit-descricao="{{ c.descricao }}"
+                                    data-edit-data="{{ c.data_compra }}"
+                                    data-edit-valor="{{ c.valor_total }}"
+                                    data-edit-entrada="{{ c.entrada }}"
+                                    data-edit-num-parcelas="{{ c.num_parcelas }}"
+                                    data-edit-categoria="{{ c.categoria }}"
+                                    data-edit-metodo="{{ c.metodo_pagamento }}"
+                                    data-edit-cartao="{{ c.cartao_id or '' }}"
+                                    data-edit-observacao="{{ c.observacao or '' }}"
+                                    data-edit-parcelas-pagas="{{ c.parcelas_pagas }}">
+                                <i class="bi bi-pencil"></i>
                             </button>
 
                             <form action="{{ url_for('excluir_compra_parcelada', id=c.id) }}" method="POST" onsubmit="return confirm('Deseja excluir este parcelamento e todas as suas parcelas?');" class="d-inline">
@@ -137,9 +160,24 @@
                                         <td class="text-muted">{{ p.data_vencimento | data_br }}</td>
                                         <td class="fw-bold text-dark">{{ p.valor | moeda }}</td>
                                         <td class="text-center">
-                                            <span class="badge bg-light text-dark border">
-                                                {{ p.status }}
-                                            </span>
+                                            {% if p.status == "Pago" %}
+                                            <form action="{{ url_for('desfazer_pagamento_parcela', id=p.id) }}"
+                                                  method="POST"
+                                                  onsubmit="return confirm('Desfazer o pagamento e remover o lançamento associado?');">
+                                                <button type="submit" class="btn btn-sm btn-success rounded-pill mt-1">
+                                                    <i class="bi bi-arrow-counterclockwise me-1"></i>Pago · desfazer
+                                                </button>
+                                            </form>
+                                            {% else %}
+                                            <button type="button" class="btn btn-sm btn-outline-success rounded-pill mt-1"
+                                                    data-payment-url="{{ url_for('pagar_parcela', id=p.id) }}"
+                                                    data-payment-description="{{ c.descricao }} · Parcela {{ p.numero_parcela }}/{{ p.total_parcelas }}"
+                                                    data-payment-method="{{ c.metodo_pagamento }}"
+                                                    data-payment-card="{{ c.cartao_id or '' }}"
+                                                    onclick="abrirModalPagamento(this)">
+                                                <i class="bi bi-check2-circle me-1"></i>Marcar paga
+                                            </button>
+                                            {% endif %}
                                         </td>
                                     </tr>
                                     {% endfor %}
@@ -164,5 +202,104 @@
         </div>
     {% endif %}
 
+</div>
+
+<div class="modal fade" id="modalEditarCompraParcelada" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content modal-content-clean">
+            <div class="modal-header modal-header-clean">
+                <h5 class="modal-title fw-bold text-dark">
+                    <i class="bi bi-pencil-square me-2"></i>Editar Compra Parcelada
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <form id="formEditarCompraParcelada" method="POST">
+                <div class="modal-body p-4">
+                    <div class="alert alert-warning d-none" id="avisoParcelasPagas" role="status">
+                        Esta compra já tem parcelas pagas. Para alterar valores, data, quantidade ou método,
+                        primeiro desfaça os pagamentos. Descrição, categoria e observação continuam editáveis.
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-muted" for="edit_parc_descricao">Descrição da compra</label>
+                            <input type="text" class="form-control" name="descricao" id="edit_parc_descricao" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted" for="edit_parc_data">Data da compra</label>
+                            <input type="date" class="form-control" name="data_compra"
+                                   id="edit_parc_data" data-lock-control="data_compra" required>
+                            <input type="hidden" name="data_compra" data-lock-value="data_compra" disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted" for="edit_parc_categoria">Categoria</label>
+                            <select class="form-select" name="categoria" id="edit_parc_categoria" required>
+                                {% for cat in global_categorias %}
+                                <option value="{{ cat.categoria }}">{{ cat.categoria }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small text-muted" for="edit_parc_valor">Valor total (R$)</label>
+                            <input type="number" step="0.01" min="0.01" class="form-control"
+                                   name="valor_total" id="edit_parc_valor"
+                                   data-lock-control="valor_total" required>
+                            <input type="hidden" name="valor_total" data-lock-value="valor_total" disabled>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small text-muted" for="edit_parc_entrada">Entrada (R$)</label>
+                            <input type="number" step="0.01" min="0" class="form-control"
+                                   name="entrada" id="edit_parc_entrada"
+                                   data-lock-control="entrada" required>
+                            <input type="hidden" name="entrada" data-lock-value="entrada" disabled>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small text-muted" for="edit_parc_num">Nº de parcelas</label>
+                            <input type="number" min="1" max="72" class="form-control"
+                                   name="num_parcelas" id="edit_parc_num"
+                                   data-lock-control="num_parcelas" required>
+                            <input type="hidden" name="num_parcelas" data-lock-value="num_parcelas" disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted" for="edit_parc_metodo">Método de pagamento</label>
+                            <select class="form-select" name="metodo_pagamento" id="edit_parc_metodo"
+                                    data-lock-control="metodo_pagamento" required>
+                                <option value="Cartão de Crédito">Cartão de Crédito</option>
+                                <option value="Boleto / Carnê">Boleto / Carnê</option>
+                                <option value="Outro">Outro</option>
+                            </select>
+                            <input type="hidden" name="metodo_pagamento"
+                                   data-lock-value="metodo_pagamento" disabled>
+                        </div>
+                        <div class="col-md-6 d-none" id="edit_parc_cartao_container">
+                            <label class="form-label fw-bold small text-muted" for="edit_parc_cartao">
+                                Cartão de crédito
+                            </label>
+                            <select class="form-select" name="cartao_id" id="edit_parc_cartao"
+                                    data-lock-control="cartao_id">
+                                <option value="">Selecione o cartão</option>
+                                {% for c in global_cartoes %}
+                                <option value="{{ c.id }}">{{ c.nome }}</option>
+                                {% endfor %}
+                            </select>
+                            <input type="hidden" name="cartao_id" data-lock-value="cartao_id" disabled>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-muted" for="edit_parc_observacao">
+                                Observação
+                            </label>
+                            <input type="text" class="form-control" name="observacao"
+                                   id="edit_parc_observacao">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer modal-footer-clean">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn-action btn-primary-action">
+                        <i class="bi bi-check2-circle"></i> Salvar alterações
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 {% endblock %}

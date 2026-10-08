@@ -121,7 +121,7 @@
                     {% for linha in dados.tabela %}
                     <tr>
                         <td class="text-start fw-bold">
-                            <span class="d-inline-block rounded-circle me-1" style="width: 8px; height: 8px; background-color: #0f172a;"></span>
+                            <span class="d-inline-block rounded-circle me-1" style="width: 8px; height: 8px; background-color: {{ cores_categorias.get(linha.categoria, '#6b7280') }};"></span>
                             {{ linha.categoria }}
                         </td>
                         {% for val in linha.meses %}
@@ -153,7 +153,7 @@
                             <td>{{ val | moeda }}</td>
                         {% endfor %}
                         <td>{{ dados.total_anual_renda | moeda }}</td>
-                        <td>{{ dados.renda_mensal_lista[0] | moeda }}</td>
+                        <td>{{ dados.renda_media_mensal | moeda }}</td>
                         <td>-</td>
                     </tr>
                     <!-- Linha: Saldo Líquido -->
@@ -215,7 +215,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     x: { grid: { display: false } },
                     y: {
                         ticks: {
-                            callback: function(v) { return "R$ " + v.toLocaleString('pt-BR'); }
+                            callback: function(v) { return "R$ " + v.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
                         }
                     }
                 },
@@ -246,7 +246,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     y: {
                         stacked: true,
                         ticks: {
-                            callback: function(v) { return "R$ " + v.toLocaleString('pt-BR'); }
+                            callback: function(v) { return "R$ " + v.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
                         }
                     }
                 },

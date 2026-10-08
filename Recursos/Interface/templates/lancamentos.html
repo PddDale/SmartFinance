@@ -13,11 +13,82 @@
         </div>
 
         <div class="d-flex gap-2">
+            <button class="btn-action btn-neutral-action" data-bs-toggle="modal" data-bs-target="#modalImportarExcel">
+                <i class="bi bi-file-earmark-spreadsheet"></i> Importar Excel
+            </button>
             <button class="btn-action btn-primary-action" data-bs-toggle="modal" data-bs-target="#modalNovoLancamento">
                 <i class="bi bi-plus-circle"></i> Novo Lançamento
             </button>
         </div>
     </div>
+
+    {% if grupos_pagamentos_recorrentes %}
+    <section class="card card-clean p-3 mb-4 border-start border-4 border-warning"
+             aria-labelledby="cobrancas-recorrentes-pendentes">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-2">
+            <div>
+                <h2 class="h5 fw-bold text-dark mb-1" id="cobrancas-recorrentes-pendentes">
+                    <i class="bi bi-bell me-1"></i>Pagamentos recorrentes a confirmar
+                </h2>
+                <p class="small text-muted mb-0">As cobranças ativas aparecem aqui após o vencimento. Confirme somente depois de pagar.</p>
+            </div>
+            <span class="badge bg-light text-dark border">{{ grupos_pagamentos_recorrentes | length }} compra(s) pendente(s)</span>
+        </div>
+        {% for pagamentos in grupos_pagamentos_recorrentes %}
+        {% set recorrente_id = pagamentos[0].id %}
+        {% set primeiro_pagamento = pagamentos[0] %}
+        <article class="border rounded-3 p-3 {% if not loop.last %}mb-3{% endif %}"
+                 data-recorrente-pendente="{{ recorrente_id }}">
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-2">
+                <div>
+                    <h3 class="h6 fw-bold text-dark mb-1">{{ primeiro_pagamento.descricao }}</h3>
+                    <small class="text-muted">
+                        {{ primeiro_pagamento.categoria }}
+                        · {{ primeiro_pagamento.metodo_pagamento }}
+                        {% if primeiro_pagamento.cartao_nome %}· {{ primeiro_pagamento.cartao_nome }}{% endif %}
+                        · {{ primeiro_pagamento.valor_mensal | moeda }} por mês
+                    </small>
+                </div>
+                <span class="badge bg-light text-dark border">
+                    {{ pagamentos | length }} mês(es) a confirmar
+                </span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Mês</th>
+                            <th>Vencimento</th>
+                            <th class="text-end">Valor</th>
+                            <th class="text-end">Confirmação</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for pagamento in pagamentos %}
+                        <tr>
+                            <td>{{ pagamento.ano_mes | data_br }}</td>
+                            <td class="text-nowrap">{{ pagamento.data_vencimento | data_br }}</td>
+                            <td class="text-end fw-bold">{{ pagamento.valor_mensal | moeda }}</td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-success rounded-pill"
+                                        data-payment-url="{{ url_for('pagar_recorrente', id=pagamento.id) }}"
+                                        data-payment-month="{{ pagamento.ano_mes }}"
+                                        data-payment-description="{{ pagamento.descricao }}"
+                                        data-payment-method="{{ pagamento.metodo_pagamento }}"
+                                        data-payment-card="{{ pagamento.cartao_id or '' }}"
+                                        onclick="abrirModalPagamento(this)">
+                                    <i class="bi bi-check2-circle me-1"></i>Confirmar
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+        {% endfor %}
+    </section>
+    {% endif %}
 
     <!-- PAINEL DE FILTROS E BUSCA (MONOCROMÁTICO) -->
     <div class="card card-clean p-3 mb-4">
@@ -32,9 +103,25 @@
             </div>
 
             <!-- Filtro Mês -->
-            <div class="col-6 col-md-2">
-                <label class="form-label small fw-bold text-muted">Mês de Competência</label>
-                <input type="month" name="mes" class="form-control" value="{{ filtro_mes }}">
+            <div class="col-12 col-md-3" data-formatted-month-selector data-submit-on-change="true">
+                <label class="form-label small fw-bold text-muted" for="filtro_mes_mes">Mês de Competência</label>
+                <input type="hidden" name="mes" value="{{ filtro_mes }}" data-month-selector-value>
+                <div class="d-flex gap-1">
+                    <select id="filtro_mes_mes" class="form-select" aria-label="Mês de competência"
+                            data-month-selector-month>
+                        <option value="" {% if not filtro_mes %}selected{% endif %}>Todos</option>
+                        {% for mes in range(1, 13) %}
+                        {% set mes_iso = ano_filtro_mes ~ '-' ~ '%02d'|format(mes) %}
+                        <option value="{{ '%02d'|format(mes) }}"
+                                {% if filtro_mes[5:7] == '%02d'|format(mes) %}selected{% endif %}>
+                            {{ mes_iso | data_br }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <input type="number" class="form-control" aria-label="Ano de competência"
+                           min="1" max="9999" value="{{ ano_filtro_mes }}"
+                           data-month-selector-year required style="max-width: 6.5rem;">
+                </div>
             </div>
 
             <!-- Filtro Categoria -->
@@ -90,7 +177,9 @@
             <table class="table table-custom mb-0">
                 <thead>
                     <tr>
-                        <th style="width: 100px;">Data</th>
+                        <th aria-sort="descending" title="Mais recente primeiro" style="width: 100px;">
+                            Data <i class="bi bi-sort-down" aria-hidden="true"></i>
+                        </th>
                         <th>Descrição</th>
                         <th>Categoria</th>
                         <th>Método / Cartão</th>
@@ -183,6 +272,99 @@
 
 </div>
 
+<div class="modal fade" id="modalImportarExcel" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content modal-content-clean">
+            <div class="modal-header modal-header-clean">
+                <h5 class="modal-title fw-bold text-dark">
+                    <i class="bi bi-file-earmark-spreadsheet me-2"></i>Importar lançamentos do Excel
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div id="excelImportStatus" class="small mb-3" aria-live="polite"></div>
+                <div class="mb-3">
+                    <label for="excelImportFile" class="form-label fw-bold small text-muted">Arquivo Excel (.xlsx)</label>
+                    <input type="file" class="form-control" id="excelImportFile" accept=".xlsx" required>
+                    <div class="form-text">Será usada a primeira aba da planilha. Linhas incompletas são informadas antes de qualquer gravação.</div>
+                </div>
+                <button type="button" class="btn-action btn-neutral-action mb-3" id="excelPreviewButton">
+                    <i class="bi bi-search"></i> Ler colunas e pré-visualizar
+                </button>
+                <div id="excelImportMapping" class="d-none">
+                    <h6 class="fw-bold">Etapa 2 · Relacione as colunas</h6>
+                    <div class="row g-3 mb-3">
+                        {% for chave, rotulo in [("data", "Data da compra"), ("descricao", "Nome da compra"), ("valor", "Preço"), ("categoria", "Categoria (opcional)")] %}
+                        <div class="col-12 col-md-4">
+                            <label class="form-label small fw-bold text-muted" for="excel_{{ chave }}_col">
+                                {{ rotulo }}
+                            </label>
+                            <select class="form-select excel-column-map" id="excel_{{ chave }}_col"
+                                    name="{{ chave }}_col" {% if chave != "categoria" %}required{% endif %}>
+                                <option value="">
+                                    {% if chave == "categoria" %}Usar categoria padrão{% else %}Selecione uma coluna{% endif %}
+                                </option>
+                            </select>
+                        </div>
+                        {% endfor %}
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small fw-bold text-muted" for="excel_categoria">
+                                Categoria padrão se a coluna não for mapeada
+                            </label>
+                            <select class="form-select" id="excel_categoria">
+                                {% for cat in global_categorias %}
+                                <option value="{{ cat.categoria }}" {% if cat.categoria == "Outros" %}selected{% endif %}>{{ cat.categoria }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small fw-bold text-muted" for="excel_metodo">Método de pagamento</label>
+                            <select class="form-select" id="excel_metodo">
+                                <option value="Pix" selected>Pix</option>
+                                <option value="Cartão de Débito">Cartão de Débito</option>
+                                <option value="Dinheiro">Dinheiro</option>
+                                <option value="Cartão de Crédito">Cartão de Crédito</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small fw-bold text-muted" for="excel_formato_decimal">
+                                Padrão decimal da planilha
+                            </label>
+                            <select class="form-select" id="excel_formato_decimal">
+                                <option value="auto" selected>Detectar automaticamente</option>
+                                <option value="brasileiro">Brasileiro — 1.234,56</option>
+                                <option value="internacional">Internacional — 1,234.56</option>
+                            </select>
+                        </div>
+                        <div class="col-12 d-none" id="excel_cartao_container">
+                            <label class="form-label small fw-bold text-muted" for="excel_cartao_id">Cartão de crédito</label>
+                            <select class="form-select" id="excel_cartao_id">
+                                <option value="">Selecione o cartão</option>
+                                {% for cartao in global_cartoes %}
+                                <option value="{{ cartao.id }}">{{ cartao.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-responsive border rounded-3">
+                        <table class="table table-sm table-striped mb-0">
+                            <thead class="table-light"><tr id="excelPreviewHeaders"></tr></thead>
+                            <tbody id="excelPreviewRows"></tbody>
+                        </table>
+                    </div>
+                    <p class="small text-muted mt-2 mb-0" id="excelPreviewCount"></p>
+                </div>
+            </div>
+            <div class="modal-footer modal-footer-clean">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn-action btn-primary-action d-none" id="excelImportButton">
+                    <i class="bi bi-upload"></i> Validar e importar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- MODAL DE EDIÇÃO DE LANÇAMENTO -->
 <div class="modal fade" id="modalEditarLancamento" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -197,8 +379,18 @@
                 <div class="modal-body p-4">
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label fw-bold small text-muted">Data do Gasto</label>
-                            <input type="date" class="form-control" name="data" id="edit_data" required>
+                            <label class="form-label fw-bold small text-muted" for="edit_data_display">Data do Gasto</label>
+                            <div class="input-group position-relative" data-local-date-input>
+                                <input type="text" class="form-control" id="edit_data_display"
+                                       placeholder="dd/mm/aaaa" inputmode="numeric" autocomplete="off"
+                                       data-date-display required>
+                                <button type="button" class="btn btn-outline-secondary"
+                                        data-date-picker-button aria-label="Selecionar data">
+                                    <i class="bi bi-calendar-event"></i>
+                                </button>
+                                <input type="date" class="local-date-picker" name="data" id="edit_data"
+                                       data-date-value tabindex="-1" aria-hidden="true" required>
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Valor (R$)</label>
@@ -206,9 +398,12 @@
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-bold small text-muted">Descrição</label>
-                            <input type="text" class="form-control" name="descricao" id="edit_descricao"
-                                   required autocomplete="off"
-                                   data-cat-target="edit_categoria">
+                            <div class="position-relative">
+                                <input type="text" class="form-control" name="descricao" id="edit_descricao"
+                                       required autocomplete="off"
+                                       data-cat-target="edit_categoria"
+                                       data-lancamento-autocomplete>
+                            </div>
                             <div class="auto-cat-hint text-muted" id="edit_cat_hint"></div>
                         </div>
                         <div class="col-md-6">
@@ -229,9 +424,12 @@
                             </select>
                         </div>
 
-                        <div class="col-12" id="edit_cartao_container">
-                            <label class="form-label fw-bold small text-muted">Cartão de Crédito</label>
+                        <div class="col-12 d-none" id="edit_cartao_container">
+                            <label class="form-label fw-bold small text-muted" for="edit_cartao_id">
+                                Cartão de Crédito
+                            </label>
                             <select class="form-select" name="cartao_id" id="edit_cartao_id">
+                                <option value="">Selecione o cartão de crédito</option>
                                 {% for c in global_cartoes %}
                                     <option value="{{ c.id }}">{{ c.nome }} (Fecha dia {{ c.fechamento_dia }} / Vence dia {{ c.vencimento_dia }})</option>
                                 {% endfor %}

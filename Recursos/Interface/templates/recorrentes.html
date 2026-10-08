@@ -9,14 +9,16 @@
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
         <div>
             <h1 class="h3 fw-bold text-dark mb-0">Gastos Recorrentes e Assinaturas</h1>
-            <p class="text-muted small mb-0">Contas fixas mensais (Aluguel, Condomínio, Internet) e assinaturas com controle de pausa mensal.</p>
+            <p class="text-muted small mb-0">Planeje pagamentos e ative ou pause cada recorrência mês a mês no ano inteiro.</p>
         </div>
 
         <div class="d-flex align-items-center gap-2">
-            <!-- Seletor do mês para verificação do status de ativação -->
+            <!-- Seletor do ano para verificação dos status mensais -->
             <form method="GET" action="{{ url_for('recorrentes') }}" class="d-flex align-items-center gap-2">
-                <span class="small text-muted fw-bold">Mês de Análise:</span>
-                <input type="month" name="mes" value="{{ ano_mes }}" class="form-control form-control-sm" onchange="this.form.submit()">
+                <label for="ano_recorrentes" class="small text-muted fw-bold mb-0">Ano:</label>
+                <input type="number" name="ano" id="ano_recorrentes" min="1" max="9999"
+                       value="{{ ano }}" class="form-control form-control-sm"
+                       style="width: 7rem;" onchange="this.form.submit()">
             </form>
 
             <button class="btn-action btn-primary-action" data-bs-toggle="modal" data-bs-target="#modalNovoRecorrente">
@@ -33,13 +35,13 @@
                     <i class="bi bi-arrow-repeat"></i>
                 </div>
                 <div>
-                    <span class="text-muted small fw-bold text-uppercase">Total Recorrente Ativo em {{ ano_mes | data_br }}</span>
-                    <h2 class="fw-bold text-dark mb-0">{{ total_mensal_ativo | moeda }}</h2>
-                    <small class="text-muted">Impacto fixo garantido no orçamento deste mês</small>
+                    <span class="text-muted small fw-bold text-uppercase">Total Recorrente Ativo em {{ ano }}</span>
+                    <h2 class="fw-bold text-dark mb-0">{{ total_anual_ativo | moeda }}</h2>
+                    <small class="text-muted">Soma dos meses ativos no ano selecionado</small>
                 </div>
             </div>
             <div class="text-md-end text-muted small">
-                <i class="bi bi-info-circle me-1"></i>Você pode <strong>pausar</strong> uma assinatura para um mês específico sem precisar excluí-la!
+                <i class="bi bi-info-circle me-1"></i>Uma cobrança ativa aparece em <strong>Lançamentos</strong> após o vencimento e só é registrada quando você confirma.
             </div>
         </div>
     </div>
@@ -50,56 +52,74 @@
             <table class="table table-custom mb-0">
                 <thead>
                     <tr>
-                        <th style="width: 80px;" class="text-center">Dia</th>
-                        <th>Descrição da Assinatura / Conta Fixa</th>
+                        <th style="width: 70px;" class="text-center">Dia</th>
+                        <th>Descrição</th>
                         <th>Categoria</th>
-                        <th>Método / Cartão</th>
-                        <th>Valor Mensal</th>
-                        <th class="text-center" style="width: 170px;">Cobrança em {{ ano_mes | data_br }}</th>
+                        <th class="text-end">Valor</th>
+                        {% for mes in meses %}
+                        {% set ano_mes = '%04d-%02d'|format(ano, mes) %}
+                        <th class="text-center small">{{ ano_mes | data_br }}</th>
+                        {% endfor %}
                         <th class="text-center" style="width: 100px;">Ações</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for r in recorrentes %}
-                    <tr id="recorrente-row-{{ r.id }}" class="{% if r.status_mes != 1 %}opacity-50 table-light{% endif %}">
+                    <tr id="recorrente-row-{{ r.id }}">
                         <td class="text-center fw-bold text-muted">
                             <span class="badge bg-light text-dark border">Dia {{ r.dia_cobranca }}</span>
                         </td>
                         <td>
                             <span class="fw-bold text-dark">{{ r.descricao }}</span>
+                            <small class="text-muted d-block">
+                                {{ r.metodo_pagamento }}{% if r.cartao_nome %} · {{ r.cartao_nome }}{% endif %}
+                            </small>
                         </td>
                         <td>
-                            <span class="badge bg-light text-dark border">{{ r.categoria }}</span>
+                            {% set cor = r.categoria_cor or '#6b7280' %}
+                            {% set icone = r.categoria_icone or 'bi-tags' %}
+                            <span class="cat-badge"
+                                  style="background-color: {{ cor }}18; border-color: {{ cor }}55; color: {{ cor }};">
+                                <span class="cat-dot" style="background-color: {{ cor }};"></span>
+                                <i class="bi {{ icone }}" aria-hidden="true"></i>{{ r.categoria }}
+                            </span>
                         </td>
-                        <td>
-                            {% if r.cartao_nome %}
-                                <span class="badge bg-dark text-white">
-                                    <i class="bi bi-credit-card me-1"></i>{{ r.cartao_nome }}
-                                </span>
-                            {% else %}
-                                <span class="badge bg-light text-dark border">
-                                    {{ r.metodo_pagamento }}
-                                </span>
-                            {% endif %}
-                        </td>
-                        <td class="fw-bold text-dark fs-6">
+                        <td class="text-end fw-bold text-dark">
                             {{ r.valor_mensal | moeda }}
                         </td>
-                        <td class="text-center">
-                            <!-- Toggle switch AJAX para ativar/pausar no mês -->
-                            <div class="form-check form-switch d-inline-block">
-                                <input class="form-check-input toggle-recorrente-mes"
-                                       type="checkbox"
-                                       role="switch"
-                                       id="switch-rec-{{ r.id }}"
-                                       data-id="{{ r.id }}"
-                                       data-mes="{{ ano_mes }}"
-                                       {% if r.status_mes == 1 %}checked{% endif %}>
-                                <label class="form-check-label small fw-bold" for="switch-rec-{{ r.id }}">
-                                    {% if r.status_mes == 1 %}Ativo{% else %}Pausado{% endif %}
-                                </label>
+                        {% for mes in meses %}
+                        {% set ano_mes = '%04d-%02d'|format(ano, mes) %}
+                        {% set estado = r.status_meses.get(ano_mes, {}) %}
+                        {% set mes_disponivel = ano_mes >= r.mes_inicio %}
+                        {% set ativo = estado.get('ativo', r.ativo_padrao == 1) and mes_disponivel %}
+                        <td class="text-center align-middle">
+                            <div class="d-flex flex-column align-items-center gap-1">
+                                {% if not mes_disponivel %}
+                                <span class="text-muted" aria-label="Recorrência ainda não cadastrada">—</span>
+                                {% elif estado.get('pago') %}
+                                <span class="badge bg-success">Pago</span>
+                                <form action="{{ url_for('desfazer_pagamento_recorrente', id=r.id) }}"
+                                      method="POST"
+                                      onsubmit="return confirm('Desfazer o pagamento e remover o lançamento associado?');">
+                                    <input type="hidden" name="ano_mes" value="{{ ano_mes }}">
+                                    <button type="submit" class="btn btn-link btn-sm p-0 text-muted">
+                                        Desfazer
+                                    </button>
+                                </form>
+                                {% else %}
+                                <input class="form-check-input toggle-recorrente-mes m-0"
+                                       type="checkbox" role="switch"
+                                       id="switch-rec-{{ r.id }}-{{ mes }}"
+                                       aria-label="{{ r.descricao }}: {{ ano_mes | data_br }}"
+                                       data-id="{{ r.id }}" data-mes="{{ ano_mes }}"
+                                       {% if ativo %}checked{% endif %}>
+                                <span class="small text-muted">
+                                    {% if ativo %}Ativo{% else %}Pausado{% endif %}
+                                </span>
+                                {% endif %}
                             </div>
                         </td>
+                        {% endfor %}
                         <td class="text-center">
                             <div class="btn-group btn-group-sm">
                                 <button type="button" class="btn btn-outline-dark btn-sm rounded-start-pill"
@@ -125,7 +145,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="7" class="text-center py-5 text-muted">
+                        <td colspan="17" class="text-center py-5 text-muted">
                             Nenhum gasto recorrente cadastrado ainda.
                         </td>
                     </tr>
@@ -156,11 +176,36 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Valor Mensal (R$)</label>
-                            <input type="number" step="0.01" min="0.01" class="form-control fw-bold" name="valor_mensal" placeholder="0,00" required>
+                            <input type="text" inputmode="decimal" class="form-control fw-bold" name="valor_mensal" placeholder="0,00" required>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Dia da Cobrança</label>
                             <input type="number" min="1" max="31" class="form-control" name="dia_cobranca" value="5" required>
+                        </div>
+                        <div class="col-12" data-formatted-month-selector>
+                            {% set mes_inicio_ano = mes_inicio_padrao[:4] %}
+                            {% set mes_inicio_mes = mes_inicio_padrao[5:7] %}
+                            <label class="form-label fw-bold small text-muted" for="rec_mes_inicio_mes">Começou a pagar em</label>
+                            <input type="hidden" id="rec_mes_inicio" name="mes_inicio"
+                                   value="{{ mes_inicio_padrao }}" data-month-selector-value>
+                            <div class="d-flex gap-2">
+                                <select class="form-select" id="rec_mes_inicio_mes"
+                                        aria-label="Mês de início da recorrência"
+                                        data-month-selector-month required>
+                                    {% for mes in range(1, 13) %}
+                                    {% set mes_iso = mes_inicio_ano ~ '-' ~ '%02d'|format(mes) %}
+                                    <option value="{{ '%02d'|format(mes) }}"
+                                            {% if mes_inicio_mes == '%02d'|format(mes) %}selected{% endif %}>
+                                        {{ mes_iso | data_br }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <input type="number" class="form-control" id="rec_mes_inicio_ano"
+                                       aria-label="Ano de início da recorrência" min="1" max="9999"
+                                       value="{{ mes_inicio_ano }}" data-month-selector-year required
+                                       style="max-width: 7rem;">
+                            </div>
+                            <div class="form-text">Os meses desde essa data aparecem para confirmação em Lançamentos.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Categoria</label>
@@ -217,7 +262,7 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Valor Mensal (R$)</label>
-                            <input type="number" step="0.01" min="0.01" class="form-control fw-bold" name="valor_mensal" id="edit_rec_valor" required>
+                            <input type="text" inputmode="decimal" class="form-control fw-bold" name="valor_mensal" id="edit_rec_valor" required>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Dia da Cobrança</label>

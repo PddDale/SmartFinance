@@ -36,11 +36,11 @@
         </form>
     </div>
 
-    <div class="row g-4 mb-4">
+    <div class="row g-4 mb-4 align-items-stretch">
 
         <!-- COLUNA 1: RENDAS MENSAIS E PATRIMÔNIO (MONOCROMÁTICO) -->
-        <div class="col-12 col-lg-5">
-            <div class="card card-clean p-4 mb-4">
+        <div class="col-12 col-lg-5 d-flex">
+            <div class="card card-clean p-4 h-100 w-100">
                 <h5 class="fw-bold text-dark mb-3">
                     <i class="bi bi-cash-stack me-2"></i>Renda de {{ config.ano_ativo }} e Patrimônio
                 </h5>
@@ -56,6 +56,43 @@
                         </select>
                     </div>
 
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="renda_variavel_mensal" name="renda_variavel_mensal" value="1"
+                               {% if config.renda_variavel_mensal %}checked{% endif %}>
+                        <label class="form-check-label fw-bold small text-muted" for="renda_variavel_mensal">
+                            Informar rendas diferentes para cada mês
+                        </label>
+                    </div>
+                    <div id="rendas_mensais_container"
+                         class="border rounded-3 p-3 mb-3 {% if not config.renda_variavel_mensal %}d-none{% endif %}">
+                        <p class="small text-muted mb-2">
+                            Opcional. Desativado, o valor mensal padrão acima será aplicado aos 12 meses.
+                            Ativado, cada mês usa os valores informados abaixo.
+                        </p>
+                        <div class="row g-2">
+                            {% for renda in config.rendas_mensais %}
+                            <div class="col-12 col-sm-6">
+                                <div class="border rounded-2 p-2">
+                                    <strong class="small d-block mb-2">{{ meses_nomes[loop.index0] }}</strong>
+                                    <label class="form-label small text-muted mb-1" for="salario_mes_{{ '%02d'|format(loop.index) }}">Salário (R$)</label>
+                                    <input type="text" inputmode="decimal" data-min="0"
+                                           class="form-control form-control-sm mb-2"
+                                           id="salario_mes_{{ '%02d'|format(loop.index) }}"
+                                           name="salario_mes_{{ '%02d'|format(loop.index) }}"
+                                           value="{{ renda.salario | decimal_br }}">
+                                    <label class="form-label small text-muted mb-1" for="outras_rendas_mes_{{ '%02d'|format(loop.index) }}">Outras rendas (R$)</label>
+                                    <input type="text" inputmode="decimal" data-min="0"
+                                           class="form-control form-control-sm"
+                                           id="outras_rendas_mes_{{ '%02d'|format(loop.index) }}"
+                                           name="outras_rendas_mes_{{ '%02d'|format(loop.index) }}"
+                                           value="{{ renda.outras_rendas | decimal_br }}">
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <h6 class="fw-bold text-dark mb-0">Rendas previstas</h6>
                         <span class="small text-muted">Informe os valores por mês ou por ano</span>
@@ -67,15 +104,15 @@
                             <div class="col-6">
                                 <div class="input-group">
                                     <span class="input-group-text">R$/mês</span>
-                                    <input type="number" step="0.01" min="0" class="form-control fw-bold income-monthly"
-                                           name="salario_mensal" data-income-key="salario" value="{{ config.salario }}" required>
+                                    <input type="text" inputmode="decimal" data-min="0" class="form-control fw-bold income-monthly"
+                                           name="salario_mensal" data-income-key="salario" value="{{ config.salario | decimal_br }}" required>
                                 </div>
                             </div>
                             <div class="col-6">
                                 <div class="input-group">
                                     <span class="input-group-text">R$/ano</span>
-                                    <input type="number" step="0.01" min="0" class="form-control fw-bold income-annual"
-                                           name="salario_anual" data-income-key="salario" value="{{ config.salario_anual }}" required>
+                                    <input type="text" inputmode="decimal" data-min="0" class="form-control fw-bold income-annual"
+                                           name="salario_anual" data-income-key="salario" value="{{ config.salario_anual | decimal_br }}" required>
                                 </div>
                             </div>
                         </div>
@@ -88,15 +125,15 @@
                             <div class="col-6">
                                 <div class="input-group">
                                     <span class="input-group-text">R$/mês</span>
-                                    <input type="number" step="0.01" min="0" class="form-control fw-bold income-monthly"
-                                           name="outras_rendas_mensais" data-income-key="outras_rendas" value="{{ config.outras_rendas }}" required>
+                                    <input type="text" inputmode="decimal" data-min="0" class="form-control fw-bold income-monthly"
+                                           name="outras_rendas_mensais" data-income-key="outras_rendas" value="{{ config.outras_rendas | decimal_br }}" required>
                                 </div>
                             </div>
                             <div class="col-6">
                                 <div class="input-group">
                                     <span class="input-group-text">R$/ano</span>
-                                    <input type="number" step="0.01" min="0" class="form-control fw-bold income-annual"
-                                           name="outras_rendas_anuais" data-income-key="outras_rendas" value="{{ config.outras_rendas_anuais }}" required>
+                                    <input type="text" inputmode="decimal" data-min="0" class="form-control fw-bold income-annual"
+                                           name="outras_rendas_anuais" data-income-key="outras_rendas" value="{{ config.outras_rendas_anuais | decimal_br }}" required>
                                 </div>
                             </div>
                         </div>
@@ -105,8 +142,10 @@
 
                     <div class="p-3 bg-light rounded-3 mb-3 border">
                         <div class="d-flex justify-content-between align-items-center">
-                            <span class="text-muted small fw-bold">RENDA TOTAL DISPONÍVEL:</span>
-                            <span class="fw-bold text-dark fs-5">{{ config.renda_total | moeda }}</span>
+                            <span class="text-muted small fw-bold">
+                                {% if config.renda_variavel_mensal %}RENDA TOTAL MÉDIA POR MÊS:{% else %}RENDA TOTAL DISPONÍVEL:{% endif %}
+                            </span>
+                            <span class="fw-bold text-dark fs-5">{{ config.renda_total_media | moeda }}</span>
                         </div>
                     </div>
 
@@ -119,13 +158,13 @@
                     <!-- Saldo Conta Corrente -->
                     <div class="mb-3">
                         <label class="form-label fw-bold small text-muted">Saldo em Conta Corrente (R$)</label>
-                        <input type="number" step="0.01" class="form-control fw-bold" name="saldo_conta_corrente" value="{{ config.saldo_conta_corrente }}" required>
+                        <input type="text" inputmode="decimal" class="form-control fw-bold" name="saldo_conta_corrente" value="{{ config.saldo_conta_corrente | decimal_br }}" required>
                     </div>
 
                     <!-- Investimentos -->
                     <div class="mb-3">
                         <label class="form-label fw-bold small text-muted">Valor em Investimentos / Aplicações (R$)</label>
-                        <input type="number" step="0.01" class="form-control fw-bold" name="valor_investido" value="{{ config.valor_investido }}" required>
+                        <input type="text" inputmode="decimal" class="form-control fw-bold" name="valor_investido" value="{{ config.valor_investido | decimal_br }}" required>
                     </div>
 
                     <div class="p-3 bg-light rounded-3 mb-4 border">
@@ -143,8 +182,8 @@
         </div>
 
         <!-- COLUNA 2: LIMITES DE GASTO POR CATEGORIA -->
-        <div class="col-12 col-lg-7">
-            <div class="card card-clean p-4">
+        <div class="col-12 col-lg-7 d-flex">
+            <div class="card card-clean p-4 h-100 w-100">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h5 class="fw-bold text-dark mb-0">
                         <i class="bi bi-sliders me-2"></i>Limites Mensais por Categoria
@@ -167,16 +206,16 @@
                                 <tr>
                                     <td>
                                         <div class="d-flex align-items-center gap-2">
-                                            <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #0f172a;"></div>
-                                            <i class="bi {{ cat.icone }} text-muted"></i>
+                                            <div style="width: 10px; height: 10px; border-radius: 50%; background-color: {{ cat.cor }};"></div>
+                                            <i class="bi {{ cat.icone }}" style="color: {{ cat.cor }};"></i>
                                             <span class="fw-bold text-dark">{{ cat.categoria }}</span>
                                         </div>
                                     </td>
                                     <td>
                                         <div class="input-group input-group-sm">
                                             <span class="input-group-text bg-white text-muted">R$</span>
-                                            <input type="number" step="0.01" min="0" class="form-control text-end fw-bold"
-                                                   name="limite_{{ cat.categoria }}" value="{{ cat.limite_mensal }}" required>
+                                            <input type="text" inputmode="decimal" data-min="0" class="form-control text-end fw-bold"
+                                                   name="limite_{{ cat.categoria }}" value="{{ cat.limite_mensal | decimal_br }}" required>
                                         </div>
                                     </td>
                                 </tr>
@@ -209,7 +248,7 @@
         </div>
 
         <form action="{{ url_for('excluir_dados') }}" method="POST" id="form-excluir-dados">
-            <div class="row g-3 align-items-end">
+            <div class="row g-3 align-items-start">
                 <div class="col-12 col-md-4">
                     <label for="tipo-exclusao" class="form-label fw-bold">O que deseja excluir?</label>
                     <select class="form-select" id="tipo-exclusao" name="tipo" required>

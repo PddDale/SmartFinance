@@ -59,9 +59,11 @@
                     </div>
                     <div class="text-end">
                         <span class="badge bg-white text-dark fw-bold rounded-pill px-2 py-1 small">
-                            Fecha Dia {{ c.fechamento_dia }}
+                            Fecha dia {{ c.fechamento_dia }} ({{ c.proximo_fechamento | data_br }})
                         </span>
-                        <div class="small text-white-50 mt-1">Vence Dia {{ c.vencimento_dia }}</div>
+                        <div class="small text-white-50 mt-1">
+                            Vence dia {{ c.vencimento_dia }} ({{ c.proximo_vencimento | data_br }})
+                        </div>
                     </div>
                 </div>
 
@@ -71,9 +73,15 @@
                         <span>Limite Utilizado</span>
                         <span class="fw-bold text-white">{{ c.limite_comprometido | moeda }} / {{ c.limite_total | moeda }}</span>
                     </div>
-                    <div class="progress-clean bg-dark" style="height: 7px;">
-                        <div class="progress-bar bg-white"
-                             style="width: {{ [c.percentual_uso, 100] | min }}%;"></div>
+                    <div class="progress-clean credit-card-progress" data-contrast-progress
+                         role="progressbar"
+                         aria-label="Limite utilizado do cartão {{ c.nome }}"
+                         aria-valuenow="{{ [0, [c.percentual_uso, 100] | min] | max }}"
+                         aria-valuemin="0" aria-valuemax="100"
+                         aria-valuetext="{{ c.percentual_uso }}% utilizado"
+                         style="height: 7px;">
+                        <div class="progress-clean-fill"
+                             style="width: {{ [0, [c.percentual_uso, 100] | min] | max }}%;"></div>
                     </div>
                     <div class="d-flex justify-content-between align-items-center mt-2">
                         <small class="text-white-50">Disponível: <strong class="text-white">{{ c.limite_disponivel | moeda }}</strong></small>
@@ -124,9 +132,22 @@
             </div>
 
             <!-- Seletor do Mês da Fatura -->
-            <form method="GET" action="{{ url_for('cartoes') }}" class="d-flex align-items-center gap-2">
-                <span class="small text-muted fw-bold">Fatura com Vencimento em:</span>
-                <input type="month" name="mes" value="{{ ano_mes }}" class="form-control form-control-sm" onchange="this.form.submit()">
+            <form method="GET" action="{{ url_for('cartoes') }}"
+                  class="d-flex align-items-center gap-2"
+                  data-formatted-month-selector data-submit-on-change="true">
+                <label for="fatura_mes_mes" class="small text-muted fw-bold mb-0">Fatura com Vencimento em:</label>
+                <input type="hidden" name="mes" id="fatura_mes" value="{{ ano_mes }}"
+                       data-month-selector-value>
+                <select id="fatura_mes_mes" class="form-select form-select-sm"
+                        aria-label="Mês da fatura" data-month-selector-month>
+                    {% for mes in range(1, 13) %}
+                    {% set mes_iso = ano_mes[:4] ~ '-' ~ '%02d'|format(mes) %}
+                    <option value="{{ '%02d'|format(mes) }}" {% if ano_mes[5:7] == '%02d'|format(mes) %}selected{% endif %}>{{ mes_iso | data_br }}</option>
+                    {% endfor %}
+                </select>
+                <input type="number" id="fatura_mes_ano" class="form-control form-control-sm"
+                       aria-label="Ano da fatura" min="1" max="9999" value="{{ ano_mes[:4] }}" required
+                       style="width: 6.5rem;" data-month-selector-year>
             </form>
         </div>
 
@@ -169,7 +190,15 @@
                                             <td class="text-muted small">{{ a.data | data_br }}</td>
                                             <td class="fw-semibold text-dark">{{ a.descricao }}</td>
                                             <td><span class="badge bg-light text-dark border">Avulso</span></td>
-                                            <td><span class="badge bg-light text-dark border">{{ a.categoria }}</span></td>
+                                            {% set cor = a.categoria_cor or '#6b7280' %}
+                                            {% set icone = a.categoria_icone or 'bi-tags' %}
+                                            <td>
+                                                <span class="cat-badge"
+                                                      style="background-color: {{ cor }}18; border-color: {{ cor }}55; color: {{ cor }};">
+                                                    <span class="cat-dot" style="background-color: {{ cor }};"></span>
+                                                    <i class="bi {{ icone }}" aria-hidden="true"></i>{{ a.categoria }}
+                                                </span>
+                                            </td>
                                             <td class="text-end fw-bold text-dark">{{ a.valor | moeda }}</td>
                                         </tr>
                                         {% endfor %}
@@ -182,7 +211,15 @@
                                                 {{ p.compra_descricao }} <span class="badge bg-light text-dark border">Parc {{ p.numero_parcela }}/{{ p.total_parcelas }}</span>
                                             </td>
                                             <td><span class="badge bg-light text-dark border">Parcelamento</span></td>
-                                            <td>-</td>
+                                            {% set cor = p.categoria_cor or '#6b7280' %}
+                                            {% set icone = p.categoria_icone or 'bi-tags' %}
+                                            <td>
+                                                <span class="cat-badge"
+                                                      style="background-color: {{ cor }}18; border-color: {{ cor }}55; color: {{ cor }};">
+                                                    <span class="cat-dot" style="background-color: {{ cor }};"></span>
+                                                    <i class="bi {{ icone }}" aria-hidden="true"></i>{{ p.categoria }}
+                                                </span>
+                                            </td>
                                             <td class="text-end fw-bold text-dark">{{ p.valor | moeda }}</td>
                                         </tr>
                                         {% endfor %}
@@ -193,7 +230,15 @@
                                             <td class="text-muted small">Dia {{ r.dia_cobranca }}</td>
                                             <td class="fw-semibold text-dark">{{ r.descricao }}</td>
                                             <td><span class="badge bg-light text-dark border">Assinatura</span></td>
-                                            <td><span class="badge bg-light text-dark border">{{ r.categoria }}</span></td>
+                                            {% set cor = r.categoria_cor or '#6b7280' %}
+                                            {% set icone = r.categoria_icone or 'bi-tags' %}
+                                            <td>
+                                                <span class="cat-badge"
+                                                      style="background-color: {{ cor }}18; border-color: {{ cor }}55; color: {{ cor }};">
+                                                    <span class="cat-dot" style="background-color: {{ cor }};"></span>
+                                                    <i class="bi {{ icone }}" aria-hidden="true"></i>{{ r.categoria }}
+                                                </span>
+                                            </td>
                                             <td class="text-end fw-bold text-dark">{{ r.valor_mensal | moeda }}</td>
                                         </tr>
                                         {% endfor %}
@@ -263,6 +308,7 @@
                                 <option value="">Cor personalizada</option>
                                 <option value="#820ad1">Nubank — roxo</option>
                                 <option value="#ec7000">Itaú — laranja</option>
+                                <option value="#000000">XP — preto</option>
                                 <option value="#cc092f">Bradesco — vermelho</option>
                                 <option value="#003882">Banco do Brasil — azul</option>
                                 <option value="#ec0000">Santander — vermelho</option>

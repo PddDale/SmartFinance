@@ -41,7 +41,8 @@ def init_db():
             outras_rendas REAL NOT NULL DEFAULT 500.0,
             saldo_conta_corrente REAL NOT NULL DEFAULT 0.0,
             valor_investido REAL NOT NULL DEFAULT 0.0,
-            data_atualizacao TEXT
+            data_atualizacao TEXT,
+            renda_variavel_mensal INTEGER NOT NULL DEFAULT 0
         );
     """)
 
@@ -55,6 +56,10 @@ def init_db():
         cursor.execute(
             "ALTER TABLE configuracoes ADD COLUMN formato_data TEXT NOT NULL DEFAULT 'dd/mm/aaaa';"
         )
+    if "renda_variavel_mensal" not in colunas_config:
+        cursor.execute(
+            "ALTER TABLE configuracoes ADD COLUMN renda_variavel_mensal INTEGER NOT NULL DEFAULT 0;"
+        )
     cursor.execute("""
         UPDATE configuracoes
         SET ano_ativo = CAST(strftime('%Y', 'now', 'localtime') AS INTEGER)
@@ -66,6 +71,14 @@ def init_db():
             ano INTEGER PRIMARY KEY CHECK (ano BETWEEN 1 AND 9999),
             salario_mensal REAL NOT NULL DEFAULT 0.0,
             outras_rendas_mensais REAL NOT NULL DEFAULT 0.0,
+            data_atualizacao TEXT
+        );
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rendas_mensais (
+            ano_mes TEXT PRIMARY KEY,
+            salario REAL NOT NULL DEFAULT 0.0,
+            outras_rendas REAL NOT NULL DEFAULT 0.0,
             data_atualizacao TEXT
         );
     """)
@@ -164,8 +177,19 @@ def init_db():
             metodo_pagamento TEXT DEFAULT 'Cartão de Débito',
             cartao_id INTEGER REFERENCES cartoes(id) ON DELETE SET NULL,
             ativo_padrao INTEGER DEFAULT 1,
+            mes_inicio TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
+    """)
+    colunas_recorrentes = {
+        row["name"] for row in cursor.execute("PRAGMA table_info(gastos_recorrentes);")
+    }
+    if "mes_inicio" not in colunas_recorrentes:
+        cursor.execute("ALTER TABLE gastos_recorrentes ADD COLUMN mes_inicio TEXT;")
+    cursor.execute("""
+        UPDATE gastos_recorrentes
+        SET mes_inicio = substr(created_at, 1, 7)
+        WHERE mes_inicio IS NULL OR mes_inicio = '';
     """)
 
     # 8. Status mensal de gastos recorrentes (Permitir pausar/ativar por mês específico)
@@ -175,8 +199,58 @@ def init_db():
             recorrente_id INTEGER NOT NULL REFERENCES gastos_recorrentes(id) ON DELETE CASCADE,
             ano_mes TEXT NOT NULL,            -- YYYY-MM
             ativo INTEGER NOT NULL,           -- 1 = Ativo, 0 = Pausado
+            pago INTEGER NOT NULL DEFAULT 0,
+            metodo_pagamento_pago TEXT,
+            cartao_id_pago INTEGER REFERENCES cartoes(id) ON DELETE SET NULL,
+            lancamento_id INTEGER,
             UNIQUE(recorrente_id, ano_mes)
         );
+    """)
+    colunas_status_recorrente = {
+        row["name"] for row in cursor.execute("PRAGMA table_info(recorrentes_status_mes);")
+    }
+    for nome, definicao in (
+        ("pago", "INTEGER NOT NULL DEFAULT 0"),
+        ("metodo_pagamento_pago", "TEXT"),
+        ("cartao_id_pago", "INTEGER REFERENCES cartoes(id) ON DELETE SET NULL"),
+        ("lancamento_id", "INTEGER"),
+    ):
+        if nome not in colunas_status_recorrente:
+            cursor.execute(
+                f"ALTER TABLE recorrentes_status_mes ADD COLUMN {nome} {definicao};"
+            )
+
+    colunas_parcelas = {
+        row["name"] for row in cursor.execute("PRAGMA table_info(parcelas_detalhe);")
+    }
+    for nome, definicao in (
+        ("metodo_pagamento_pago", "TEXT"),
+        ("cartao_id_pago", "INTEGER REFERENCES cartoes(id) ON DELETE SET NULL"),
+        ("lancamento_id", "INTEGER"),
+    ):
+        if nome not in colunas_parcelas:
+            cursor.execute(
+                f"ALTER TABLE parcelas_detalhe ADD COLUMN {nome} {definicao};"
+            )
+    cursor.execute("""
+        UPDATE parcelas_detalhe
+        SET status = 'Pendente', metodo_pagamento_pago = NULL,
+            cartao_id_pago = NULL, lancamento_id = NULL
+        WHERE status = 'Pago' AND lancamento_id IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM lancamentos
+                WHERE lancamentos.id = parcelas_detalhe.lancamento_id
+            );
+    """)
+    cursor.execute("""
+        UPDATE recorrentes_status_mes
+        SET pago = 0, metodo_pagamento_pago = NULL,
+            cartao_id_pago = NULL, lancamento_id = NULL
+        WHERE pago = 1 AND lancamento_id IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM lancamentos
+                WHERE lancamentos.id = recorrentes_status_mes.lancamento_id
+            );
     """)
     cursor.execute("""
         UPDATE lancamentos SET metodo_pagamento = 'Cartão de Débito'
@@ -324,13 +398,27 @@ def popular_dados_exemplo():
     cursor.execute("DELETE FROM recorrentes_status_mes;")
     cursor.execute("DELETE FROM gastos_recorrentes;")
     cursor.execute("DELETE FROM cartoes;")
+    cursor.execute("DELETE FROM rendas_mensais;")
 
     # 1. Configurações
     cursor.execute("""
         UPDATE configuracoes 
         SET salario = 6500.0, outras_rendas = 800.0, saldo_conta_corrente = 4250.80, valor_investido = 32800.0,
+            renda_variavel_mensal = 0,
             data_atualizacao = datetime('now', 'localtime')
         WHERE id = 1;
+    """)
+    cursor.execute("""
+        INSERT INTO rendas_anuais (
+            ano, salario_mensal, outras_rendas_mensais, data_atualizacao
+        ) VALUES (
+            CAST(strftime('%Y', 'now', 'localtime') AS INTEGER), 6500.0, 800.0,
+            datetime('now', 'localtime')
+        )
+        ON CONFLICT(ano) DO UPDATE SET
+            salario_mensal = excluded.salario_mensal,
+            outras_rendas_mensais = excluded.outras_rendas_mensais,
+            data_atualizacao = excluded.data_atualizacao;
     """)
 
     # 2. Cartões

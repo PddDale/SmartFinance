@@ -16,12 +16,20 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }, 5000);
 
+    setupLocalDateInputs();
+
     // 3. Monitoramento dinâmico de Método de Pagamento e Cartão (Formulário de Lançamento)
     setupMetodoPagamentoListener("metodo_pagamento", "cartao_container", "cartao_id", "data_lancamento", "fatura_preview");
     setupMetodoPagamentoListener("modal_metodo_pagamento", "modal_cartao_container", "modal_cartao_id", "modal_data_lancamento", "modal_fatura_preview");
+    setupMetodoPagamentoListener("edit_metodo_pagamento", "edit_cartao_container", "edit_cartao_id", "edit_data", null);
 
     // 4. Cálculo dinâmico de parcelas no modal de Compra Parcelada
     setupCalculoParcelas();
+    setupMetodoPagamentoListener(
+        "edit_parc_metodo", "edit_parc_cartao_container",
+        "edit_parc_cartao", "edit_parc_data", null
+    );
+    setupEditarCompraParcelada();
 
     // 5. Configurar listener de alternância de status de recorrentes (AJAX)
     setupRecorrentesToggle();
@@ -37,7 +45,313 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // 9. Presets de cores de cartões com opção de cor personalizada
     setupCoresCartoes();
+
+    // 10. Rendas variáveis por mês
+    setupRendaVariavelMensal();
+
+    // 11. Pagamento rápido de parcelas e recorrências
+    setupModalPagamento();
+
+    // 12. Importação guiada de planilhas Excel
+    setupExcelImportWizard();
+
+    // 13. Exibição do mês da fatura conforme a preferência de data
+    setupFormattedMonthSelector();
+
+    // 14. Sugestões de descrições de lançamentos anteriores
+    setupLancamentoAutocomplete();
+
+    // 15. Contraste das barras de limite nos cartões
+    setupCreditCardProgressContrast();
 });
+
+function formatarDataLocal(dataIso) {
+    const partes = String(dataIso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return partes ? `${partes[3]}/${partes[2]}/${partes[1]}` : "";
+}
+
+function setupLocalDateInputs() {
+    document.querySelectorAll("[data-local-date-input]").forEach(function (grupo) {
+        const campoIso = grupo.querySelector("[data-date-value]");
+        const campoExibicao = grupo.querySelector("[data-date-display]");
+        const botaoCalendario = grupo.querySelector("[data-date-picker-button]");
+        if (!campoIso || !campoExibicao || !botaoCalendario) return;
+
+        function sincronizarExibicao() {
+            campoExibicao.value = formatarDataLocal(campoIso.value);
+            campoExibicao.setCustomValidity("");
+        }
+
+        function sincronizarValor() {
+            const partes = campoExibicao.value.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            if (!partes) {
+                campoIso.value = "";
+                campoExibicao.setCustomValidity(
+                    campoExibicao.value ? "Informe a data no formato DD/MM/AAAA." : ""
+                );
+                return;
+            }
+
+            const [, dia, mes, ano] = partes;
+            const dataIso = `${ano}-${mes}-${dia}`;
+            const data = new Date(`${dataIso}T00:00:00`);
+            const valida = Number.isFinite(data.getTime()) &&
+                data.getFullYear() === Number(ano) &&
+                data.getMonth() === Number(mes) - 1 &&
+                data.getDate() === Number(dia);
+            if (!valida) {
+                campoIso.value = "";
+                campoExibicao.setCustomValidity("Informe uma data válida no formato DD/MM/AAAA.");
+                return;
+            }
+
+            campoIso.value = dataIso;
+            campoExibicao.setCustomValidity("");
+            campoIso.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        campoExibicao.addEventListener("input", sincronizarValor);
+        campoIso.addEventListener("change", sincronizarExibicao);
+        botaoCalendario.addEventListener("click", function () {
+            if (typeof campoIso.showPicker === "function") {
+                campoIso.showPicker();
+            } else {
+                campoIso.click();
+            }
+        });
+        sincronizarExibicao();
+    });
+}
+
+function setupCreditCardProgressContrast() {
+    document.querySelectorAll(".credit-card-ui").forEach(function (cartao) {
+        const barra = cartao.querySelector("[data-contrast-progress]");
+        if (!barra) return;
+
+        const cor = getComputedStyle(cartao).backgroundColor;
+        const componentes = cor.match(/[\d.]+/g);
+        if (!componentes || componentes.length < 3) return;
+
+        const rgb = componentes.slice(0, 3).map(Number);
+        const luminancia = rgb
+            .map(function (valor) {
+                const canal = valor / 255;
+                return canal <= 0.04045
+                    ? canal / 12.92
+                    : Math.pow((canal + 0.055) / 1.055, 2.4);
+            })
+            .reduce(function (soma, canal, indice) {
+                return soma + canal * [0.2126, 0.7152, 0.0722][indice];
+            }, 0);
+
+        const contrastePreto = (luminancia + 0.05) / 0.05;
+        const contrasteBranco = 1.05 / (luminancia + 0.05);
+        const preenchimento = contrasteBranco > contrastePreto
+            ? "255, 255, 255"
+            : "0, 0, 0";
+
+        barra.style.setProperty("--progress-fill-color", `rgb(${preenchimento})`);
+        barra.style.setProperty(
+            "--progress-track-color",
+            `rgba(${preenchimento}, 0.28)`
+        );
+    });
+}
+
+function parseValorLocalizado(valor) {
+    let texto = String(valor || "").trim().replace(/R\$/g, "").replace(/\s/g, "");
+    if (!texto) return NaN;
+    if (texto.includes(",") && texto.includes(".")) {
+        texto = texto.lastIndexOf(",") > texto.lastIndexOf(".")
+            ? texto.replace(/\./g, "").replace(",", ".")
+            : texto.replace(/,/g, "");
+    } else if (texto.includes(",")) {
+        texto = texto.replace(/\./g, "").replace(",", ".");
+    } else if (/^-?\d{1,3}(?:\.\d{3})+$/.test(texto)) {
+        texto = texto.replace(/\./g, "");
+    }
+    return Number(texto);
+}
+
+function formatarMesAno(mes, ano) {
+    const formato = document.body.dataset.formatoData || "dd/mm/aaaa";
+    if (formato === "dd/mm/aaaa") return `${mes}/${ano}`;
+    const data = new Date(0);
+    data.setFullYear(Number(ano), Number(mes) - 1, 1);
+    return new Intl.DateTimeFormat("pt-BR", {
+        month: "long",
+        year: "numeric"
+    }).format(data);
+}
+
+function setupFormattedMonthSelector() {
+    document.querySelectorAll("[data-formatted-month-selector]").forEach(function (seletor) {
+        const form = seletor.closest("form");
+        const mes = seletor.querySelector("[data-month-selector-month]");
+        const ano = seletor.querySelector("[data-month-selector-year]");
+        const valorMes = seletor.querySelector("[data-month-selector-value]");
+        if (!form || !mes || !ano || !valorMes) return;
+
+        function atualizarOpcoes() {
+            Array.from(mes.options).forEach(function (opcao) {
+                if (opcao.value) {
+                    opcao.textContent = formatarMesAno(opcao.value, ano.value);
+                }
+            });
+        }
+
+        function atualizarValorEEnviar() {
+            if (!ano.reportValidity()) return;
+            valorMes.value = mes.value
+                ? `${String(ano.value).padStart(4, "0")}-${mes.value}`
+                : "";
+            if (seletor.dataset.submitOnChange === "true") {
+                form.requestSubmit();
+            }
+        }
+
+        ano.addEventListener("input", function () {
+            atualizarOpcoes();
+            valorMes.value = mes.value
+                ? `${String(ano.value).padStart(4, "0")}-${mes.value}`
+                : "";
+        });
+        ano.addEventListener("change", atualizarValorEEnviar);
+        mes.addEventListener("change", atualizarValorEEnviar);
+    });
+}
+
+function setupLancamentoAutocomplete() {
+    document.querySelectorAll("[data-lancamento-autocomplete]").forEach(function (input) {
+        const lista = document.createElement("div");
+        lista.className = "launch-suggestions d-none";
+        lista.id = `${input.id}_sugestoes`;
+        lista.setAttribute("role", "listbox");
+        input.setAttribute("aria-autocomplete", "list");
+        input.setAttribute("aria-controls", lista.id);
+        input.setAttribute("aria-expanded", "false");
+        input.parentElement.appendChild(lista);
+
+        let sugestoes = [];
+        let indiceAtivo = -1;
+        let requisicaoAtual = 0;
+        let ignorarProximaBusca = false;
+
+        function fecharLista() {
+            lista.classList.add("d-none");
+            input.setAttribute("aria-expanded", "false");
+            input.removeAttribute("aria-activedescendant");
+            indiceAtivo = -1;
+        }
+
+        function selecionar(sugestao) {
+            input.value = sugestao;
+            fecharLista();
+            ignorarProximaBusca = true;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+
+        function mostrarErro() {
+            sugestoes = [];
+            lista.replaceChildren();
+            const aviso = document.createElement("div");
+            aviso.className = "launch-suggestions-message";
+            aviso.setAttribute("role", "status");
+            aviso.textContent = "Não foi possível carregar as sugestões.";
+            lista.appendChild(aviso);
+            lista.classList.remove("d-none");
+            input.setAttribute("aria-expanded", "true");
+        }
+
+        function mostrarSugestoes(valores) {
+            sugestoes = valores;
+            indiceAtivo = -1;
+            lista.replaceChildren();
+            if (!sugestoes.length) {
+                fecharLista();
+                return;
+            }
+
+            sugestoes.forEach(function (sugestao, indice) {
+                const opcao = document.createElement("button");
+                opcao.type = "button";
+                opcao.className = "launch-suggestion";
+                opcao.id = `${lista.id}_opcao_${indice}`;
+                opcao.setAttribute("role", "option");
+                opcao.setAttribute("aria-selected", "false");
+                opcao.textContent = sugestao;
+                opcao.addEventListener("mousedown", function (evento) {
+                    evento.preventDefault();
+                    selecionar(sugestao);
+                });
+                lista.appendChild(opcao);
+            });
+            lista.classList.remove("d-none");
+            input.setAttribute("aria-expanded", "true");
+        }
+
+        input.addEventListener("input", function () {
+            if (ignorarProximaBusca) {
+                ignorarProximaBusca = false;
+                return;
+            }
+            const termo = this.value.trim();
+            const requisicao = ++requisicaoAtual;
+            if (!termo) {
+                sugestoes = [];
+                fecharLista();
+                return;
+            }
+            sugestoes = [];
+            fecharLista();
+
+            fetch(`/api/lancamentos/sugestoes?q=${encodeURIComponent(termo)}`)
+                .then(function (resposta) {
+                    if (!resposta.ok) throw new Error("Falha ao buscar descrições anteriores.");
+                    return resposta.json();
+                })
+                .then(function (dados) {
+                    if (requisicao !== requisicaoAtual || input.value.trim() !== termo) return;
+                    if (!Array.isArray(dados.sugestoes)) {
+                        throw new Error("Resposta inválida ao buscar descrições anteriores.");
+                    }
+                    mostrarSugestoes(dados.sugestoes);
+                })
+                .catch(function (erro) {
+                    if (requisicao !== requisicaoAtual) return;
+                    console.error("Erro ao carregar sugestões de lançamentos:", erro);
+                    mostrarErro();
+                });
+        });
+
+        input.addEventListener("keydown", function (evento) {
+            if (lista.classList.contains("d-none") || !sugestoes.length) {
+                if (evento.key === "Escape") fecharLista();
+                return;
+            }
+            if (evento.key === "ArrowDown" || evento.key === "ArrowUp") {
+                evento.preventDefault();
+                const passo = evento.key === "ArrowDown" ? 1 : -1;
+                indiceAtivo = (indiceAtivo + passo + sugestoes.length) % sugestoes.length;
+                Array.from(lista.children).forEach(function (opcao, indice) {
+                    const ativo = indice === indiceAtivo;
+                    opcao.classList.toggle("active", ativo);
+                    opcao.setAttribute("aria-selected", String(ativo));
+                });
+                input.setAttribute("aria-activedescendant", `${lista.id}_opcao_${indiceAtivo}`);
+            } else if (evento.key === "Enter" && indiceAtivo >= 0) {
+                evento.preventDefault();
+                selecionar(sugestoes[indiceAtivo]);
+            } else if (evento.key === "Escape") {
+                fecharLista();
+            }
+        });
+
+        input.addEventListener("blur", function () {
+            window.setTimeout(fecharLista, 120);
+        });
+    });
+}
 
 function setupRendasAnoMes() {
     const modoInput = document.getElementById("modo_renda");
@@ -52,12 +366,29 @@ function setupRendasAnoMes() {
                 });
             if (!correspondente) return;
 
-            const valor = Number(this.value);
+            const valor = parseValorLocalizado(this.value);
             correspondente.value = this.value === "" || !Number.isFinite(valor)
                 ? ""
-                : (anual ? valor / 12 : valor * 12).toFixed(2);
+                : (anual ? valor / 12 : valor * 12).toLocaleString("pt-BR", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                });
             if (modoInput) modoInput.value = anual ? "anual" : "mensal";
         });
+    });
+
+    document.querySelectorAll("[data-min]").forEach(function (input) {
+        function validarMinimo() {
+            const valor = parseValorLocalizado(input.value);
+            const minimo = Number(input.dataset.min);
+            input.setCustomValidity(
+                input.value.trim() && Number.isFinite(valor) && valor < minimo
+                    ? `Informe um valor igual ou superior a ${minimo}.`
+                    : ""
+            );
+        }
+        input.addEventListener("input", validarMinimo);
+        input.addEventListener("change", validarMinimo);
     });
 }
 
@@ -71,6 +402,259 @@ function setupCoresCartoes() {
         colorInput.addEventListener("input", function () {
             select.value = "";
         });
+    });
+}
+
+function setupRendaVariavelMensal() {
+    const toggle = document.getElementById("renda_variavel_mensal");
+    const campos = document.getElementById("rendas_mensais_container");
+    if (!toggle || !campos) return;
+    toggle.addEventListener("change", function () {
+        campos.classList.toggle("d-none", !this.checked);
+    });
+}
+
+function setupModalPagamento() {
+    const form = document.getElementById("formRegistrarPagamento");
+    const metodo = document.getElementById("metodo_pagamento_pago");
+    const containerCartao = document.getElementById("cartao_pagamento_container");
+    const cartao = document.getElementById("cartao_pagamento_id");
+    if (!form || !metodo || !containerCartao || !cartao) return;
+
+    function atualizarCartao() {
+        const usaCartao = metodo.value === "Cartão de Crédito";
+        containerCartao.classList.toggle("d-none", !usaCartao);
+        cartao.required = usaCartao;
+    }
+    metodo.addEventListener("change", atualizarCartao);
+
+    window.abrirModalPagamento = function (botao) {
+        form.action = botao.dataset.paymentUrl;
+        document.getElementById("descricaoModalPagamento").textContent =
+            `${botao.dataset.paymentDescription}. O lançamento será criado após sua confirmação.`;
+        document.getElementById("tituloModalPagamento").textContent =
+            botao.dataset.paymentMonth ? "Registrar pagamento recorrente" : "Registrar pagamento da parcela";
+        document.getElementById("mesPagamento").value = botao.dataset.paymentMonth || "";
+        metodo.value = botao.dataset.paymentMethod || "Pix";
+        cartao.value = botao.dataset.paymentCard || "";
+        atualizarCartao();
+        bootstrap.Modal.getOrCreateInstance(
+            document.getElementById("modalRegistrarPagamento")
+        ).show();
+    };
+    atualizarCartao();
+}
+
+function setupExcelImportWizard() {
+    const arquivoInput = document.getElementById("excelImportFile");
+    const botaoPrevia = document.getElementById("excelPreviewButton");
+    const botaoImportar = document.getElementById("excelImportButton");
+    const mapeamento = document.getElementById("excelImportMapping");
+    const status = document.getElementById("excelImportStatus");
+    const metodo = document.getElementById("excel_metodo");
+    const cartaoContainer = document.getElementById("excel_cartao_container");
+    const cartao = document.getElementById("excel_cartao_id");
+    if (!arquivoInput || !botaoPrevia || !botaoImportar || !mapeamento || !status) return;
+
+    let arquivoAtual = null;
+    function normalizarCabecalhoExcel(texto) {
+        return String(texto || "")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+    }
+
+    function mapearColunasConhecidas(colunas) {
+        const seletores = Array.from(
+            document.querySelectorAll(".excel-column-map")
+        );
+        const sinonimos = {
+            data: ["data", "date", "datadacompra"],
+            descricao: ["descricao", "description", "compra", "nomedacompra"],
+            valor: ["valor", "preco", "price", "valorr", "amount"],
+            categoria: ["categoria", "category", "tipodecategoria"]
+        };
+
+        seletores.forEach(function (select) {
+            const campo = select.id.replace(/^excel_|_col$/g, "");
+            const correspondencia = colunas.find(function (coluna) {
+                return sinonimos[campo].includes(
+                    normalizarCabecalhoExcel(coluna.nome)
+                );
+            });
+            if (correspondencia) {
+                select.value = String(correspondencia.indice);
+            }
+        });
+
+        atualizarDisponibilidadeColunas();
+        seletores.forEach(function (select) {
+            select.addEventListener("change", function () {
+                atualizarDisponibilidadeColunas(select);
+            });
+        });
+    }
+
+    function atualizarDisponibilidadeColunas(preferido) {
+        const seletores = Array.from(
+            document.querySelectorAll(".excel-column-map")
+        );
+        if (preferido && preferido.value) {
+            seletores.forEach(function (select) {
+                if (select !== preferido && select.value === preferido.value) {
+                    select.value = "";
+                }
+            });
+        }
+
+        const selecionados = seletores
+            .filter(select => select.value)
+            .map(select => select.value);
+        seletores.forEach(function (select) {
+            Array.from(select.options).forEach(function (opcao) {
+                opcao.disabled = Boolean(
+                    opcao.value &&
+                    opcao.value !== select.value &&
+                    selecionados.includes(opcao.value)
+                );
+            });
+        });
+    }
+
+    function mostrarStatus(texto, tipo) {
+        status.className = `small mb-3 text-${tipo}`;
+        status.textContent = texto;
+    }
+    function atualizarCartaoExcel() {
+        if (!metodo || !cartaoContainer || !cartao) return;
+        const usaCartao = metodo.value === "Cartão de Crédito";
+        cartaoContainer.classList.toggle("d-none", !usaCartao);
+        cartao.required = usaCartao;
+    }
+    if (metodo) metodo.addEventListener("change", atualizarCartaoExcel);
+    atualizarCartaoExcel();
+
+    arquivoInput.addEventListener("change", function () {
+        arquivoAtual = this.files[0] || null;
+        mapeamento.classList.add("d-none");
+        botaoImportar.classList.add("d-none");
+        mostrarStatus("", "muted");
+    });
+
+    botaoPrevia.addEventListener("click", async function () {
+        if (!arquivoAtual) {
+            mostrarStatus("Selecione um arquivo .xlsx primeiro.", "danger");
+            return;
+        }
+        const dados = new FormData();
+        dados.append("arquivo", arquivoAtual);
+        botaoPrevia.disabled = true;
+        mostrarStatus("Lendo o arquivo e preparando a prévia…", "muted");
+        try {
+            const resposta = await fetch("/lancamentos/importar/previa", {
+                method: "POST",
+                body: dados
+            });
+            const resultado = await resposta.json();
+            if (!resposta.ok || !resultado.success) {
+                throw new Error(resultado.error || "Não foi possível ler o arquivo.");
+            }
+            const cabecalho = document.getElementById("excelPreviewHeaders");
+            const corpo = document.getElementById("excelPreviewRows");
+            cabecalho.replaceChildren();
+            corpo.replaceChildren();
+            document.querySelectorAll(".excel-column-map").forEach(function (select) {
+                const opcaoInicial = select.id === "excel_categoria_col"
+                    ? "Usar categoria padrão"
+                    : "Selecione uma coluna";
+                select.replaceChildren(new Option(opcaoInicial, ""));
+                resultado.colunas.forEach(function (coluna) {
+                    const rotulo = coluna.nome || "sem título";
+                    select.add(new Option(`Coluna ${coluna.indice + 1} · ${rotulo}`, coluna.indice));
+                });
+            });
+            mapearColunasConhecidas(resultado.colunas);
+            resultado.colunas.forEach(function (coluna) {
+                const th = document.createElement("th");
+                th.textContent = coluna.nome || `Coluna ${coluna.indice + 1}`;
+                cabecalho.appendChild(th);
+            });
+            resultado.amostras.forEach(function (linha) {
+                const tr = document.createElement("tr");
+                resultado.colunas.forEach(function (_, indice) {
+                    const td = document.createElement("td");
+                    td.textContent = linha[indice] || "";
+                    tr.appendChild(td);
+                });
+                corpo.appendChild(tr);
+            });
+            document.getElementById("excelPreviewCount").textContent =
+                `${resultado.total_linhas} linha(s) com dados encontradas.`;
+            mapeamento.classList.remove("d-none");
+            botaoImportar.classList.remove("d-none");
+            mostrarStatus("Prévia pronta. Confirme as colunas antes de importar.", "success");
+        } catch (erro) {
+            mostrarStatus(erro.message, "danger");
+        } finally {
+            botaoPrevia.disabled = false;
+        }
+    });
+
+    botaoImportar.addEventListener("click", async function () {
+        if (!arquivoAtual) {
+            mostrarStatus("Selecione o arquivo novamente.", "danger");
+            return;
+        }
+        const campos = ["data", "descricao", "valor"];
+        const selecoes = campos.map(campo => document.getElementById(`excel_${campo}_col`));
+        const categoriaColuna = document.getElementById("excel_categoria_col");
+        if (selecoes.some(select => !select.value) ||
+            new Set(selecoes.map(select => select.value)).size !== campos.length) {
+            mostrarStatus("Selecione três colunas diferentes para data, nome e preço.", "danger");
+            return;
+        }
+        const colunasSelecionadas = selecoes.map(select => select.value);
+        if (categoriaColuna && categoriaColuna.value) {
+            if (colunasSelecionadas.includes(categoriaColuna.value)) {
+                mostrarStatus("A coluna de categoria precisa ser diferente das demais.", "danger");
+                return;
+            }
+            colunasSelecionadas.push(categoriaColuna.value);
+        }
+        if (metodo && metodo.value === "Cartão de Crédito" && cartao && !cartao.value) {
+            mostrarStatus("Selecione o cartão de crédito utilizado.", "danger");
+            return;
+        }
+        const dados = new FormData();
+        dados.append("arquivo", arquivoAtual);
+        campos.forEach((campo, indice) => dados.append(`${campo}_col`, selecoes[indice].value));
+        dados.append("categoria_col", categoriaColuna ? categoriaColuna.value : "");
+        dados.append("categoria", document.getElementById("excel_categoria").value);
+        dados.append(
+            "formato_decimal",
+            document.getElementById("excel_formato_decimal").value
+        );
+        dados.append("metodo_pagamento", metodo ? metodo.value : "Pix");
+        if (cartao) dados.append("cartao_id", cartao.value);
+        botaoImportar.disabled = true;
+        mostrarStatus("Validando todas as linhas antes de gravar…", "muted");
+        try {
+            const resposta = await fetch("/lancamentos/importar", {
+                method: "POST",
+                body: dados
+            });
+            const resultado = await resposta.json();
+            if (!resposta.ok || !resultado.success) {
+                const erros = (resultado.erros || []).join(" · ");
+                throw new Error([resultado.error, erros].filter(Boolean).join(" "));
+            }
+            mostrarStatus(resultado.message, "success");
+            setTimeout(function () { window.location.reload(); }, 900);
+        } catch (erro) {
+            mostrarStatus(erro.message, "danger");
+            botaoImportar.disabled = false;
+        }
     });
 }
 
@@ -120,10 +704,10 @@ function setupMetodoPagamentoListener(metodoSelectId, cartaoContainerId, cartaoS
                 msg += `<strong><i class="bi bi-info-circle me-1"></i>Regra de Fatura:</strong> `;
                 if (posFechamento) {
                     msg += `Compra feita no dia <strong>${diaCompra}</strong> (após ou no dia do fechamento: <strong>${data.fechamento_dia}</strong>). `;
-                    msg += `Esta despesa entra na fatura seguinte, com <strong>vencimento em ${formatarDataBR(data.data_vencimento)}</strong>.`;
+                    msg += `Esta despesa entra na fatura seguinte, com <strong>vencimento em ${data.data_vencimento_formatada}</strong>.`;
                 } else {
                     msg += `Compra feita no dia <strong>${diaCompra}</strong> (antes do fechamento: <strong>${data.fechamento_dia}</strong>). `;
-                    msg += `Esta despesa entra na fatura atual, com <strong>vencimento em ${formatarDataBR(data.data_vencimento)}</strong>.`;
+                    msg += `Esta despesa entra na fatura atual, com <strong>vencimento em ${data.data_vencimento_formatada}</strong>.`;
                 }
                 msg += `</div>`;
 
@@ -164,9 +748,9 @@ function setupCalculoParcelas() {
 
         let html = `<div class="p-2 rounded bg-light border text-secondary small">`;
         html += `<i class="bi bi-calculator me-1 text-primary"></i> `;
-        html += `<strong>Simulação:</strong> ${nParc}x de <strong>R$ ${valorParc.replace(".", ",")}</strong>`;
+        html += `<strong>Simulação:</strong> ${nParc}x de <strong>R$ ${formatarValorBR(valorParc)}</strong>`;
         if (entrada > 0) {
-            html += ` (+ R$ ${entrada.toFixed(2).replace(".", ",")} de entrada)`;
+            html += ` (+ R$ ${formatarValorBR(entrada)} de entrada)`;
         }
         html += `</div>`;
 
@@ -192,6 +776,57 @@ function setupCalculoParcelas() {
     numInput.addEventListener("change", atualizarCalculo);
 }
 
+function setupEditarCompraParcelada() {
+    const form = document.getElementById("formEditarCompraParcelada");
+    const avisoParcelasPagas = document.getElementById("avisoParcelasPagas");
+    if (!form || !avisoParcelasPagas) return;
+
+    document.querySelectorAll("[data-edit-compra-parcelada]").forEach(function (botao) {
+        botao.addEventListener("click", function () {
+            form.action = `/parcelas/editar/${botao.dataset.editId}`;
+            document.getElementById("edit_parc_descricao").value =
+                botao.dataset.editDescricao || "";
+            document.getElementById("edit_parc_data").value =
+                botao.dataset.editData || "";
+            document.getElementById("edit_parc_valor").value =
+                botao.dataset.editValor || "";
+            document.getElementById("edit_parc_entrada").value =
+                botao.dataset.editEntrada || "0";
+            document.getElementById("edit_parc_num").value =
+                botao.dataset.editNumParcelas || "1";
+            document.getElementById("edit_parc_categoria").value =
+                botao.dataset.editCategoria || "";
+            document.getElementById("edit_parc_observacao").value =
+                botao.dataset.editObservacao || "";
+
+            const metodo = document.getElementById("edit_parc_metodo");
+            const cartao = document.getElementById("edit_parc_cartao");
+            metodo.value = botao.dataset.editMetodo || "Outro";
+            cartao.value = botao.dataset.editCartao || "";
+            metodo.dispatchEvent(new Event("change", { bubbles: true }));
+
+            const possuiParcelasPagas =
+                Number(botao.dataset.editParcelasPagas || 0) > 0;
+            avisoParcelasPagas.classList.toggle("d-none", !possuiParcelasPagas);
+            form.querySelectorAll("[data-lock-control]").forEach(function (controle) {
+                const chave = controle.dataset.lockControl;
+                const oculto = form.querySelector(
+                    `[data-lock-value="${chave}"]`
+                );
+                controle.disabled = possuiParcelasPagas;
+                if (oculto) {
+                    oculto.disabled = !possuiParcelasPagas;
+                    oculto.value = controle.value;
+                }
+            });
+
+            bootstrap.Modal.getOrCreateInstance(
+                document.getElementById("modalEditarCompraParcelada")
+            ).show();
+        });
+    });
+}
+
 function setupRecorrentesToggle() {
     const toggles = document.querySelectorAll(".toggle-recorrente-mes");
     toggles.forEach(toggle => {
@@ -199,6 +834,7 @@ function setupRecorrentesToggle() {
             const recId = this.getAttribute("data-id");
             const anoMes = this.getAttribute("data-mes");
             const ativo = this.checked;
+            const toggle = this;
 
             fetch("/api/recorrentes/toggle", {
                 method: "POST",
@@ -209,23 +845,18 @@ function setupRecorrentesToggle() {
                     ativo: ativo
                 })
             })
-            .then(res => res.json())
+            .then(res => {
+                if (!res.ok) throw new Error("Não foi possível atualizar este mês.");
+                return res.json();
+            })
             .then(data => {
-                if (data.success) {
-                    const row = document.getElementById(`recorrente-row-${recId}`);
-                    if (row) {
-                        if (ativo) {
-                            row.classList.remove("opacity-50", "table-light");
-                        } else {
-                            row.classList.add("opacity-50", "table-light");
-                        }
-                    }
-                }
+                if (!data.success) throw new Error(data.error || "Não foi possível atualizar este mês.");
+                const status = toggle.parentElement.querySelector("span");
+                if (status) status.textContent = ativo ? "Ativo" : "Pausado";
             })
             .catch(err => {
                 console.error("Erro ao alterar status recorrente:", err);
-                // Reverter switch em caso de erro
-                this.checked = !ativo;
+                toggle.checked = !ativo;
             });
         });
     });
@@ -234,8 +865,29 @@ function setupRecorrentesToggle() {
 function formatarDataBR(dataStr) {
     if (!dataStr) return "";
     const parts = dataStr.split("-");
-    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    if (parts.length === 3) {
+        const data = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        const formato = document.body.dataset.formatoData || "dd/mm/aaaa";
+        if (formato === "extenso") {
+            return new Intl.DateTimeFormat("pt-BR", {
+                day: "numeric", month: "long", year: "numeric"
+            }).format(data);
+        }
+        if (formato === "semana_extenso") {
+            return new Intl.DateTimeFormat("pt-BR", {
+                weekday: "long", day: "numeric", month: "long", year: "numeric"
+            }).format(data);
+        }
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
     return dataStr;
+}
+
+function formatarValorBR(valor) {
+    return Number(valor).toLocaleString("pt-BR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
 }
 
 // Preenchimento de modal de edição de lançamentos
@@ -244,21 +896,17 @@ function preencherModalEdicaoLancamento(id, data, desc, cat, val, met, cid, obs)
     if (!form) return;
     form.action = `/lancamentos/editar/${id}`;
     document.getElementById("edit_data").value = data;
+    document.getElementById("edit_data").dispatchEvent(new Event("change", { bubbles: true }));
     document.getElementById("edit_descricao").value = desc;
     document.getElementById("edit_categoria").value = cat;
     document.getElementById("edit_valor").value = val;
-    document.getElementById("edit_metodo_pagamento").value = met;
+    const metodoSelect = document.getElementById("edit_metodo_pagamento");
+    metodoSelect.value = met;
     document.getElementById("edit_observacao").value = obs || "";
 
-    const cartaoContainer = document.getElementById("edit_cartao_container");
     const cartaoSelect = document.getElementById("edit_cartao_id");
-
-    if (met === "Cartão de Crédito") {
-        cartaoContainer.classList.remove("d-none");
-        if (cid) cartaoSelect.value = cid;
-    } else {
-        cartaoContainer.classList.add("d-none");
-    }
+    cartaoSelect.value = cid || "";
+    metodoSelect.dispatchEvent(new Event("change", { bubbles: true }));
 
     const editModal = new bootstrap.Modal(document.getElementById("modalEditarLancamento"));
     editModal.show();
@@ -290,7 +938,7 @@ function preencherModalEdicaoRecorrente(id, desc, val, cat, dia, met, cid) {
     if (!form) return;
     form.action = `/recorrentes/editar/${id}`;
     document.getElementById("edit_rec_descricao").value = desc;
-    document.getElementById("edit_rec_valor").value = val;
+    document.getElementById("edit_rec_valor").value = formatarValorBR(Number(val));
     document.getElementById("edit_rec_categoria").value = cat;
     document.getElementById("edit_rec_dia").value = dia;
     document.getElementById("edit_rec_metodo").value = met;

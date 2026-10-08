@@ -9,9 +9,23 @@
 *.db
 *.sqlite
 *.sqlite3
+*.db-journal
+*.sqlite-journal
+*.sqlite3-journal
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 Recursos/Dependencias/Pacotes/
+Recursos/Dados/*
+!Recursos/Dados/README.md
+!Recursos/Dados/.gitkeep
 database.json
 backup_*.json
+*_backup.json
+*_export.json
 
 # ------------------------------------
 # Python
@@ -27,7 +41,9 @@ __pycache__/
 venv/
 env/
 ENV/
-.env
+.tox/
+.nox/
+pip-wheel-metadata/
 
 # Distribuição / empacotamento
 dist/
@@ -63,8 +79,15 @@ flask_session/
 .env
 .env.*
 !.env.example
+.envrc
+.secrets/
 secrets.py
 config_local.py
+credentials*.json
+*.pem
+*.key
+*.p12
+*.pfx
 
 # ------------------------------------
 # IDEs e Editores

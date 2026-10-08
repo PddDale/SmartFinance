@@ -13,7 +13,7 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 </head>
-<body>
+<body data-formato-data="{{ global_config.formato_data }}">
 
     <!-- NAVBAR PRINCIPAL (PRETO SÓLIDO, ALTO CONTRASTE) -->
     <nav class="navbar navbar-expand-lg navbar-dark navbar-smart sticky-top shadow-xs">
@@ -270,8 +270,19 @@
                     <div class="modal-body p-4">
                         <div class="row g-3">
                             <div class="col-md-6">
-                                <label class="form-label fw-bold small text-muted">Data do Gasto</label>
-                                <input type="date" class="form-control" name="data" id="modal_data_lancamento" value="{{ global_hoje }}" required>
+                                <label class="form-label fw-bold small text-muted" for="modal_data_lancamento_display">Data do Gasto</label>
+                                <div class="input-group position-relative" data-local-date-input>
+                                    <input type="text" class="form-control" id="modal_data_lancamento_display"
+                                           placeholder="dd/mm/aaaa" inputmode="numeric" autocomplete="off"
+                                           data-date-display required>
+                                    <button type="button" class="btn btn-outline-secondary"
+                                            data-date-picker-button aria-label="Selecionar data">
+                                        <i class="bi bi-calendar-event"></i>
+                                    </button>
+                                    <input type="date" class="local-date-picker" name="data"
+                                           id="modal_data_lancamento" value="{{ global_hoje }}"
+                                           data-date-value tabindex="-1" aria-hidden="true" required>
+                                </div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold small text-muted">Valor (R$)</label>
@@ -279,11 +290,14 @@
                             </div>
                             <div class="col-12">
                                 <label class="form-label fw-bold small text-muted">Descrição</label>
-                                <input type="text" class="form-control" name="descricao"
-                                       id="modal_descricao"
-                                       placeholder="Ex: Supermercado, Almoço, Gasolina..."
-                                       required autocomplete="off"
-                                       data-cat-target="modal_categoria">
+                                <div class="position-relative">
+                                    <input type="text" class="form-control" name="descricao"
+                                           id="modal_descricao"
+                                           placeholder="Ex: Supermercado, Almoço, Gasolina..."
+                                           required autocomplete="off"
+                                           data-cat-target="modal_categoria"
+                                           data-lancamento-autocomplete>
+                                </div>
                                 <div class="auto-cat-hint text-muted" id="modal_cat_hint"></div>
                             </div>
                             <div class="col-md-6">
@@ -345,11 +359,11 @@
                         <p class="text-muted small mb-3">Atualize o saldo disponível na sua conta corrente e o valor total alocado em investimentos.</p>
                         <div class="mb-3">
                             <label class="form-label fw-bold small text-muted">Saldo em Conta Corrente (R$)</label>
-                            <input type="number" step="0.01" class="form-control form-control-lg fw-bold" name="saldo_conta_corrente" value="{{ global_config.saldo_conta_corrente }}" required>
+                            <input type="text" inputmode="decimal" class="form-control form-control-lg fw-bold" name="saldo_conta_corrente" value="{{ global_config.saldo_conta_corrente | decimal_br }}" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold small text-muted">Valor Total Investido (R$)</label>
-                            <input type="number" step="0.01" class="form-control form-control-lg fw-bold" name="valor_investido" value="{{ global_config.valor_investido }}" required>
+                            <input type="text" inputmode="decimal" class="form-control form-control-lg fw-bold" name="valor_investido" value="{{ global_config.valor_investido | decimal_br }}" required>
                         </div>
                     </div>
                     <div class="modal-footer modal-footer-clean">
@@ -485,6 +499,7 @@
                                     <option value="">Cor personalizada</option>
                                     <option value="#820ad1">Nubank — roxo</option>
                                     <option value="#ec7000">Itaú — laranja</option>
+                                    <option value="#000000">XP — preto</option>
                                     <option value="#cc092f">Bradesco — vermelho</option>
                                     <option value="#003882">Banco do Brasil — azul</option>
                                     <option value="#ec0000">Santander — vermelho</option>
@@ -501,6 +516,47 @@
                     <div class="modal-footer modal-footer-clean">
                         <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
                         <button type="submit" class="btn-action btn-primary-action">Cadastrar Cartão</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalRegistrarPagamento" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content modal-content-clean">
+                <form id="formRegistrarPagamento" method="POST">
+                    <input type="hidden" name="ano_mes" id="mesPagamento">
+                    <div class="modal-header modal-header-clean">
+                        <h5 class="modal-title fw-bold text-dark" id="tituloModalPagamento">Registrar pagamento</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <p class="small text-muted" id="descricaoModalPagamento">
+                            O lançamento será criado automaticamente após a confirmação.
+                        </p>
+                        <label class="form-label fw-bold small text-muted" for="metodo_pagamento_pago">Método de pagamento</label>
+                        <select class="form-select mb-3" name="metodo_pagamento" id="metodo_pagamento_pago" required>
+                            <option value="Cartão de Débito">Cartão de Débito</option>
+                            <option value="Pix">Pix</option>
+                            <option value="Dinheiro">Dinheiro</option>
+                            <option value="Cartão de Crédito">Cartão de Crédito</option>
+                        </select>
+                        <div id="cartao_pagamento_container" class="d-none">
+                            <label class="form-label fw-bold small text-muted" for="cartao_pagamento_id">Cartão de crédito</label>
+                            <select class="form-select" name="cartao_id" id="cartao_pagamento_id">
+                                <option value="">Selecione o cartão</option>
+                                {% for cartao in global_cartoes %}
+                                <option value="{{ cartao.id }}">{{ cartao.nome }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer modal-footer-clean">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn-action btn-primary-action">
+                            <i class="bi bi-check2-circle"></i> Confirmar como pago
+                        </button>
                     </div>
                 </form>
             </div>

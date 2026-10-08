@@ -9,11 +9,15 @@ O SmartFinance é um aplicativo web de finanças pessoais para acompanhar gastos
 ## O que você pode fazer hoje
 
 - **Entender o panorama financeiro:** consulte indicadores de patrimônio, saldo, investimentos, gastos do mês e faturas em aberto.
-- **Acompanhar gastos do dia a dia:** registre lançamentos, organize-os por categoria e filtre por período, método de pagamento ou texto.
+- **Acompanhar gastos do dia a dia:** registre lançamentos, receba sugestões de descrições já usadas, organize-os por categoria e filtre por período, método de pagamento ou texto.
+- **Personalizar a exibição:** escolha o formato das datas e informe valores com vírgula decimal nos campos de rendas e saldos.
 - **Controlar cartões:** cadastre cartões e acompanhe compras e faturas conforme as datas de fechamento e vencimento.
-- **Planejar parcelas:** registre compras parceladas e consulte a projeção das parcelas.
-- **Lembrar despesas recorrentes:** acompanhe contas e assinaturas e pause ou reative seu controle mensal.
+- **Planejar parcelas:** registre compras parceladas, consulte a projeção e edite os dados da compra. Se já houver pagamentos confirmados, os valores e o cronograma ficam protegidos; é possível editar descrição, categoria e observação sem perder os lançamentos pagos.
+- **Lembrar despesas recorrentes:** informe desde quando a conta é cobrada, organize o ano inteiro, pause meses específicos e confirme os pagamentos vencidos agrupados por conta na aba de lançamentos.
+- **Registrar pagamentos mensais:** marque parcelas e recorrências como pagas e gere o lançamento com o método de pagamento informado.
 - **Observar a evolução ao longo do ano:** compare os meses em uma visão anual com tabelas e gráficos.
+- **Importar compras do Excel:** use o assistente para relacionar as colunas de data, descrição e preço e, opcionalmente, a categoria de cada linha. Cabeçalhos reconhecidos são mapeados automaticamente e uma mesma coluna não pode ser usada em mais de um campo. Escolha a detecção automática ou o padrão decimal brasileiro (`1.234,56`) ou internacional (`1,234.56`). Categorias da planilha precisam corresponder às categorias cadastradas; emojis e símbolos decorativos são ignorados nessa comparação. Sem coluna de categoria, é aplicada uma categoria padrão.
+- **Planejar rendas variáveis:** opcionalmente informe salário e outras rendas mês a mês; por padrão, a renda mensal é uniforme.
 - **Guardar uma cópia dos dados:** exporte um backup em JSON.
 
 ## O que vem pela frente
@@ -28,7 +32,7 @@ Estas são ideias para versões futuras; ainda não estão disponíveis no aplic
 - [ ] **Mais idiomas:** ampliar o acesso com traduções para outros idiomas.
 - [ ] **Acompanhar investimentos:** explorar uma área para organizar investimentos e acompanhar sua evolução.
 
-O SmartFinance ainda **não oferece conexão bancária automática**. A ideia para Open Finance é consultar transações somente após autorização da pessoa usuária — não realizar pagamentos. Uma integração desse tipo exigirá escolher um provedor e explicar com clareza quais dados são compartilhados e como são protegidos.
+O SmartFinance ainda **não oferece conexão bancária automática**. A importação de planilhas Excel cria lançamentos locais após o mapeamento e a validação das colunas. A ideia para Open Finance é consultar transações somente após autorização da pessoa usuária — não realizar pagamentos. Uma integração desse tipo exigirá escolher um provedor e explicar com clareza quais dados são compartilhados e como são protegidos.
 
 ## Como funciona
 

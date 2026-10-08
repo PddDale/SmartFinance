@@ -260,6 +260,43 @@ body {
     transition: opacity 0.2s ease;
 }
 
+.launch-suggestions {
+    position: absolute;
+    z-index: 1060;
+    top: 100%;
+    right: 0;
+    left: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-hover);
+}
+
+.launch-suggestion {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-main);
+    text-align: left;
+}
+
+.launch-suggestion:hover,
+.launch-suggestion.active {
+    background: var(--bg-surface-subtle);
+}
+
+.launch-suggestions-message {
+    padding: 8px 10px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
 /* ==================== CARDS & ESTRUTURA (PRETO, BRANCO E CINZA) ==================== */
 .card-clean {
     background-color: var(--bg-surface);
@@ -469,10 +506,21 @@ body {
     overflow: hidden;
 }
 
-.progress-clean .progress-bar {
+.progress-clean-fill {
+    display: block;
+    height: 100%;
+    min-width: 0;
     border-radius: var(--radius-pill);
     background-color: #0f172a;
     transition: width 0.4s ease;
+}
+
+.progress-clean[data-contrast-progress] {
+    background-color: var(--progress-track-color, #e2e8f0);
+}
+
+.progress-clean[data-contrast-progress] .progress-clean-fill {
+    background-color: var(--progress-fill-color, #0f172a);
 }
 
 /* Responsividade */
@@ -484,4 +532,14 @@ body {
         font-size: 0.9rem;
         min-width: 140px;
     }
+}
+
+.local-date-picker {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 2.75rem;
+    height: 100%;
+    opacity: 0;
+    pointer-events: none;
 }
