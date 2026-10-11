@@ -45,12 +45,14 @@ ENV/
 .nox/
 pip-wheel-metadata/
 
-# Distribuição / empacotamento
-dist/
-build/
+# Distribuição / empacotamento (PyInstaller / NSIS)
+/dist/
+/build/
 *.egg-info/
 *.egg
 .eggs/
+.portable
+legacy-db-path.txt
 
 # Pytest / Coverage
 .pytest_cache/

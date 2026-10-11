@@ -1,22 +1,36 @@
+__lazy_modules__ = ("io", "json", "re", "socket", "threading", "time", "webbrowser")
+
 import os
+import sqlite3
+import uuid
 from datetime import datetime, date
 import json
 import io
 import re
+import socket
+import threading
+import time
+import webbrowser
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+import sys
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Response
 from jinja2 import pass_context
 from werkzeug.exceptions import RequestEntityTooLarge
 
 if __package__:
-    from . import database, models
+    from . import backup as backup_tools, database, models
 else:
+    import backup as backup_tools
     import database
     import models
 
-PROJECT_DIR = Path(__file__).resolve().parents[2]
-RESOURCE_DIR = PROJECT_DIR / "Recursos"
+if getattr(sys, "frozen", False):
+    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    RESOURCE_DIR = BUNDLE_DIR / "Recursos"
+else:
+    PROJECT_DIR = Path(__file__).resolve().parents[2]
+    RESOURCE_DIR = PROJECT_DIR / "Recursos"
 app = Flask(
     __name__,
     template_folder=str(RESOURCE_DIR / "Interface" / "templates"),
@@ -27,7 +41,7 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 @app.errorhandler(RequestEntityTooLarge)
 def arquivo_muito_grande(_erro):
-    if request.path.startswith("/lancamentos/importar"):
+    if request.path.startswith(("/lancamentos/importar", "/configuracoes/importar-json")):
         return jsonify({
             "success": False,
             "error": "O arquivo excede o limite de 10 MB.",
@@ -1138,6 +1152,122 @@ def exportar_json():
         headers={"Content-Disposition": f"attachment;filename=database_financeiro_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"}
     )
 
+_PENDING_BACKUP_IMPORTS = {}
+_MAX_PENDING_BACKUP_IMPORTS = 3
+
+def _prune_pending_backup_imports():
+    expiration_time = time.time() - 3600
+    for token, pending in list(_PENDING_BACKUP_IMPORTS.items()):
+        if pending["created_at"] < expiration_time:
+            del _PENDING_BACKUP_IMPORTS[token]
+
+def _render_backup_import_preview(token, preview, error=None):
+    return render_template(
+        "importar_backup.html",
+        token=token,
+        conflicts=preview["conflicts"],
+        duplicates=preview["duplicates"],
+        new_count=preview["new_count"],
+        identical_count=preview["identical_count"],
+        error=error,
+    )
+
+@app.route("/configuracoes/importar-json", methods=["POST"])
+def importar_json():
+    upload = request.files.get("arquivo_backup")
+    if upload is None or not upload.filename:
+        flash("Selecione o arquivo JSON do backup.", "danger")
+        return redirect(url_for("configuracoes"))
+    if Path(upload.filename).suffix.casefold() != ".json":
+        flash("Selecione um arquivo com extensão .json.", "danger")
+        return redirect(url_for("configuracoes"))
+
+    try:
+        raw = upload.read()
+        preview = backup_tools.preview_backup(raw)
+        _prune_pending_backup_imports()
+        if len(_PENDING_BACKUP_IMPORTS) >= _MAX_PENDING_BACKUP_IMPORTS:
+            flash(
+                "Já existem prévias de importação pendentes. Confirme ou cancele uma antes de enviar outra.",
+                "warning",
+            )
+            return redirect(url_for("configuracoes"))
+        token = uuid.uuid4().hex
+        _PENDING_BACKUP_IMPORTS[token] = {
+            "backup": preview["backup"],
+            "fingerprints": preview["fingerprints"],
+            "created_at": time.time(),
+        }
+        return _render_backup_import_preview(token, preview)
+    except sqlite3.Error as error:
+        app.logger.exception("Falha ao preparar a prévia do backup")
+        flash(f"Não foi possível validar o backup no banco atual: {error}", "danger")
+        return redirect(url_for("configuracoes"))
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        app.logger.info("Backup JSON rejeitado: %s", error)
+        flash(f"Não foi possível preparar a importação: {error}", "danger")
+        return redirect(url_for("configuracoes"))
+
+@app.route("/configuracoes/importar-json/confirmar", methods=["POST"])
+def confirmar_importacao_json():
+    token = request.form.get("token", "")
+    _prune_pending_backup_imports()
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        flash("A prévia de importação expirou ou é inválida.", "danger")
+        return redirect(url_for("configuracoes"))
+    staged = _PENDING_BACKUP_IMPORTS.get(token)
+    if staged is None:
+        flash("A prévia de importação expirou. Envie o arquivo novamente.", "danger")
+        return redirect(url_for("configuracoes"))
+
+    try:
+        preview = backup_tools.preview_backup(
+            json.dumps(staged["backup"], ensure_ascii=False).encode("utf-8")
+        )
+        decisions = {
+            conflict["id"]: request.form.get(f"conflito_{conflict['id']}", "")
+            for conflict in preview["conflicts"]
+        }
+        imported_count = backup_tools.merge_backup(
+            json.dumps(staged["backup"], ensure_ascii=False).encode("utf-8"),
+            decisions,
+            staged["fingerprints"],
+        )
+        del _PENDING_BACKUP_IMPORTS[token]
+        flash(
+            f"Backup mesclado. {imported_count} registro(s) importado(s) ou atualizado(s); "
+            f"{preview['identical_count']} registro(s) já eram iguais.",
+            "success",
+        )
+        return redirect(url_for("configuracoes"))
+    except sqlite3.Error:
+        app.logger.exception("Falha no banco durante a importação do backup")
+        _PENDING_BACKUP_IMPORTS.pop(token, None)
+        flash(
+            "A importação foi cancelada e nenhuma alteração foi gravada. "
+            "O backup contém dados incompatíveis ou referências inválidas.",
+            "danger",
+        )
+        return redirect(url_for("configuracoes"))
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        app.logger.info("Importação JSON não confirmada: %s", error)
+        try:
+            preview = backup_tools.preview_backup(
+                json.dumps(staged["backup"], ensure_ascii=False).encode("utf-8")
+            )
+            staged["fingerprints"] = preview["fingerprints"]
+        except (ValueError, TypeError, KeyError):
+            _PENDING_BACKUP_IMPORTS.pop(token, None)
+            flash(f"Não foi possível concluir a importação: {error}", "danger")
+            return redirect(url_for("configuracoes"))
+        return _render_backup_import_preview(token, preview, str(error))
+
+@app.route("/configuracoes/importar-json/cancelar/<token>")
+def cancelar_importacao_json(token):
+    if re.fullmatch(r"[0-9a-f]{32}", token):
+        _PENDING_BACKUP_IMPORTS.pop(token, None)
+    return redirect(url_for("configuracoes"))
+
 @app.route("/api/calcular-fatura", methods=["POST"])
 def api_calcular_fatura():
     """Retorna previsão em tempo real da fatura com base na data da compra e no cartão selecionado."""
@@ -1223,14 +1353,56 @@ def api_encerrar():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
-if __name__ == "__main__":
+def _run_local_server():
+    address = ("127.0.0.1", 5000)
+    url = f"http://{address[0]}:{address[1]}"
+    server_error = []
     try:
         import waitress
+    except ImportError:
+        def serve():
+            app.run(debug=False, host=address[0], port=address[1])
+    else:
+        def serve():
+            waitress.serve(app, host=address[0], port=address[1], threads=6)
+
+    def serve_and_capture_error():
+        try:
+            serve()
+        except Exception as erro:
+            server_error.append(erro)
+
+    server_thread = threading.Thread(
+        target=serve_and_capture_error,
+        name="smartfinance-web-server",
+    )
+    server_thread.start()
+
+    for _ in range(100):
+        if server_error:
+            raise RuntimeError("Não foi possível iniciar o servidor local.") from server_error[0]
+        if not server_thread.is_alive():
+            raise RuntimeError("O servidor local foi encerrado antes de ficar disponível.")
+        try:
+            with socket.create_connection(address, timeout=0.2):
+                break
+        except OSError:
+            time.sleep(0.1)
+    else:
+        raise RuntimeError("O servidor local não ficou disponível em 10 segundos.")
+
+    if not webbrowser.open(url):
+        app.logger.warning("Não foi possível abrir o navegador automaticamente: %s", url)
+    server_thread.join()
+
+
+if __name__ == "__main__":
+    try:
         print("=" * 64)
         print("   SmartFinance - Servidor WSGI de Alta Performance (Waitress)")
-        print("   Acesso: http://127.0.0.1:5000")
         print("   Pressione CTRL+C ou utilize o botao 'Sair' na pagina para fechar.")
         print("=" * 64)
-        waitress.serve(app, host="127.0.0.1", port=5000, threads=6)
-    except ImportError:
-        app.run(debug=False, host="127.0.0.1", port=5000)
+        _run_local_server()
+    except Exception:
+        app.logger.exception("Erro ao iniciar o servidor local do SmartFinance")
+        raise

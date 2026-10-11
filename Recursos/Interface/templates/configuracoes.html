@@ -25,6 +25,27 @@
     </div>
 
     <div class="card card-clean p-3 mb-4">
+        <h5 class="fw-bold text-dark mb-2">
+            <i class="bi bi-cloud-upload me-2"></i>Importar backup JSON
+        </h5>
+        <p class="small text-muted mb-3">
+            O conteúdo será mesclado aos dados atuais. Registros iguais serão ignorados e conflitos
+            poderão ser revisados antes da gravação.
+        </p>
+        <form action="{{ url_for('importar_json') }}" method="POST" enctype="multipart/form-data"
+              class="d-flex flex-column flex-sm-row align-items-sm-end gap-2">
+            <div class="flex-grow-1">
+                <label for="arquivo_backup" class="form-label fw-bold small">Arquivo de backup (.json)</label>
+                <input type="file" id="arquivo_backup" name="arquivo_backup" class="form-control"
+                       accept=".json,application/json" required>
+            </div>
+            <button type="submit" class="btn-action btn-neutral-action">
+                <i class="bi bi-upload"></i> Revisar importação
+            </button>
+        </form>
+    </div>
+
+    <div class="card card-clean p-3 mb-4">
         <form action="{{ url_for('salvar_ano_ativo') }}" method="POST" class="d-flex flex-column flex-sm-row align-items-sm-center gap-2">
             <label for="ano_ativo" class="fw-bold text-dark mb-0">Ano de referência</label>
             <input type="number" id="ano_ativo" name="ano_ativo" class="form-control" min="1" max="9999"

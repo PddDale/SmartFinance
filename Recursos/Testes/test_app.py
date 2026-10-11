@@ -1,18 +1,143 @@
+import io
 import json
 import os
+import re
+import sys
 import tempfile
+import time
 import unittest
 from datetime import date, timedelta
+from pathlib import Path
 from unittest.mock import patch
+
+_ORIGINAL_DATA_DIR = os.environ.get("SMARTFINANCE_DATA_DIR")
+_ISOLATED_IMPORT_DATA = tempfile.TemporaryDirectory()
+os.environ["SMARTFINANCE_DATA_DIR"] = _ISOLATED_IMPORT_DATA.name
 
 from Recursos.Codigo.app import app
 from Recursos.Codigo import database, models
 
+if _ORIGINAL_DATA_DIR is None:
+    os.environ.pop("SMARTFINANCE_DATA_DIR", None)
+else:
+    os.environ["SMARTFINANCE_DATA_DIR"] = _ORIGINAL_DATA_DIR
+
 
 class TestSmartFinance(unittest.TestCase):
     def setUp(self):
+        temporary_data = tempfile.TemporaryDirectory()
+        original_db_path = database.DB_PATH
+        database.DB_PATH = os.path.join(temporary_data.name, "finance.db")
+        self.addCleanup(temporary_data.cleanup)
+        self.addCleanup(setattr, database, "DB_PATH", original_db_path)
+        database.init_db()
+        conn = database.get_db_connection()
+        conn.execute("""
+            INSERT INTO cartoes (nome, limite_total, fechamento_dia, vencimento_dia)
+            VALUES ('Cartão de teste', 1000, 10, 20);
+        """)
+        conn.commit()
+        conn.close()
         self.app = app.test_client()
         self.app.testing = True
+
+    def _required_match_group(self, pattern, content):
+        match = re.search(pattern, content)
+        if match is None:
+            self.fail(f"Não foi encontrado o padrão esperado: {pattern!r}")
+        return match.group(1).decode("ascii")
+
+    def test_data_dir_uses_portable_and_installed_locations(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            executable_dir = os.path.join(pasta, "program")
+            os.makedirs(executable_dir)
+            executable = os.path.join(executable_dir, "SmartFinance.exe")
+            local_app_data = os.path.join(pasta, "local")
+            environment = {
+                "SMARTFINANCE_DATA_DIR": "",
+                "LOCALAPPDATA": local_app_data,
+            }
+            with (
+                patch.object(database.sys, "frozen", True, create=True),
+                patch.object(database.sys, "executable", executable),
+                patch.dict(os.environ, environment),
+            ):
+                with open(os.path.join(executable_dir, ".portable"), "w", encoding="utf-8"):
+                    pass
+                self.assertEqual(
+                    database._get_data_dir(),
+                    Path(executable_dir) / "Dados",
+                )
+                os.remove(os.path.join(executable_dir, ".portable"))
+                self.assertEqual(
+                    database._get_data_dir(),
+                    Path(local_app_data) / "SmartFinance",
+                )
+
+    def test_python_315_defers_selected_imports(self):
+        app_module = sys.modules["Recursos.Codigo.app"]
+        self.assertEqual(
+            app_module.__dict__["__lazy_modules__"],
+            ("io", "json", "re", "socket", "threading", "time", "webbrowser"),
+        )
+        if sys.version_info >= (3, 15):
+            import types
+
+            self.assertIsInstance(
+                app_module.__dict__["webbrowser"],
+                types.LazyImportType,
+            )
+            self.assertTrue(callable(app_module.webbrowser.open))
+            self.assertIsInstance(
+                app_module.__dict__["webbrowser"],
+                types.ModuleType,
+            )
+        else:
+            import types
+
+            self.assertIsInstance(
+                app_module.__dict__["webbrowser"],
+                types.ModuleType,
+            )
+
+    def test_legacy_database_migration_preserves_existing_data(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            source = Path(pasta) / "old" / "finance.db"
+            destination = Path(pasta) / "new" / "finance.db"
+            source.parent.mkdir()
+            conn = database.sqlite3.connect(source)
+            try:
+                conn.execute("CREATE TABLE test_data (value TEXT NOT NULL);")
+                conn.execute("INSERT INTO test_data VALUES ('legacy');")
+                conn.commit()
+            finally:
+                conn.close()
+
+            self.assertTrue(
+                database._copy_database_without_overwriting(source, destination)
+            )
+            conn = database.sqlite3.connect(destination)
+            try:
+                self.assertEqual(
+                    conn.execute("SELECT value FROM test_data;").fetchone()[0],
+                    "legacy",
+                )
+                conn.execute("UPDATE test_data SET value = 'new data';")
+                conn.commit()
+            finally:
+                conn.close()
+
+            self.assertFalse(
+                database._copy_database_without_overwriting(source, destination)
+            )
+            conn = database.sqlite3.connect(destination)
+            try:
+                self.assertEqual(
+                    conn.execute("SELECT value FROM test_data;").fetchone()[0],
+                    "new data",
+                )
+            finally:
+                conn.close()
 
     def test_01_index_dashboard(self):
         response = self.app.get("/")
@@ -108,6 +233,277 @@ class TestSmartFinance(unittest.TestCase):
         self.assertIn("cartoes", data)
         self.assertIn("lancamentos", data)
 
+    def _prepare_backup_import(self, backup):
+        raw = json.dumps(backup, ensure_ascii=False).encode("utf-8")
+        response = self.app.post(
+            "/configuracoes/importar-json",
+            data={"arquivo_backup": (io.BytesIO(raw), "backup.json")},
+            content_type="multipart/form-data",
+        )
+        return response, raw
+
+    def test_importar_backup_mescla_registros_novos(self):
+        backup = models.exportar_backup_json()
+        backup["cartoes"].append({
+            "id": 5000,
+            "nome": "Cartão importado",
+            "limite_total": 2500.0,
+            "fechamento_dia": 12,
+            "vencimento_dia": 22,
+            "cor": "#123456",
+            "bandeira": "Visa",
+            "ativo": 1,
+            "created_at": "2026-10-11 12:00:00",
+        })
+        response, _ = self._prepare_backup_import(backup)
+        self.assertEqual(response.status_code, 200)
+        token = self._required_match_group(
+            rb'name="token" value="([0-9a-f]{32})"', response.data
+        )
+
+        response = self.app.post(
+            "/configuracoes/importar-json/confirmar",
+            data={"token": token},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Backup mesclado".encode(), response.data)
+        conn = database.get_db_connection()
+        imported = conn.execute(
+            "SELECT nome FROM cartoes WHERE id = 5000;"
+        ).fetchone()
+        conn.close()
+        self.assertEqual(imported["nome"], "Cartão importado")
+
+    def test_importar_backup_pede_decisao_para_conflitos(self):
+        backup = models.exportar_backup_json()
+        backup["cartoes"][0]["nome"] = "Nome vindo do backup"
+        response, _ = self._prepare_backup_import(backup)
+        self.assertEqual(response.status_code, 200)
+        token = self._required_match_group(
+            rb'name="token" value="([0-9a-f]{32})"', response.data
+        )
+        conflict = self._required_match_group(
+            rb'name="conflito_([0-9a-f]{64})"', response.data
+        )
+
+        response = self.app.post(
+            "/configuracoes/importar-json/confirmar",
+            data={
+                "token": token,
+                f"conflito_{conflict}": "incoming",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        conn = database.get_db_connection()
+        card = conn.execute("SELECT nome FROM cartoes WHERE id = 1;").fetchone()
+        conn.close()
+        self.assertEqual(card["nome"], "Nome vindo do backup")
+
+    def test_importar_backup_pode_manter_valor_atual_no_conflito(self):
+        backup = models.exportar_backup_json()
+        backup["cartoes"][0]["nome"] = "Nome que deve ser ignorado"
+        backup["cartoes"].append({
+            "id": 5002,
+            "nome": "Cartão sem conflito",
+            "limite_total": 2500.0,
+            "fechamento_dia": 12,
+            "vencimento_dia": 22,
+            "cor": "#123456",
+            "bandeira": "Visa",
+            "ativo": 1,
+            "created_at": "2026-10-11 12:00:00",
+        })
+        response, _ = self._prepare_backup_import(backup)
+        token = self._required_match_group(
+            rb'name="token" value="([0-9a-f]{32})"', response.data
+        )
+        conflict = self._required_match_group(
+            rb'name="conflito_([0-9a-f]{64})"', response.data
+        )
+
+        response = self.app.post(
+            "/configuracoes/importar-json/confirmar",
+            data={"token": token, f"conflito_{conflict}": "current"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        conn = database.get_db_connection()
+        current = conn.execute(
+            "SELECT nome FROM cartoes WHERE id = 1;"
+        ).fetchone()
+        imported = conn.execute(
+            "SELECT nome FROM cartoes WHERE id = 5002;"
+        ).fetchone()
+        conn.close()
+        self.assertEqual(current["nome"], "Cartão de teste")
+        self.assertEqual(imported["nome"], "Cartão sem conflito")
+
+    def test_importar_backup_invalido_nao_altera_dados(self):
+        response = self.app.post(
+            "/configuracoes/importar-json",
+            data={"arquivo_backup": (io.BytesIO(b'{"versao":"1"}'), "backup.json")},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Formato de backup n", response.data)
+        conn = database.get_db_connection()
+        self.assertEqual(
+            conn.execute("SELECT COUNT(*) FROM cartoes;").fetchone()[0],
+            1,
+        )
+        conn.close()
+
+    def test_importar_backup_rejeita_referencia_inexistente_antes_da_confirmacao(self):
+        backup = models.exportar_backup_json()
+        backup["lancamentos"].append({
+            "id": 9001,
+            "data": "2026-10-10",
+            "ano_mes": "2026-10",
+            "descricao": "Referência inválida",
+            "categoria": "Outros",
+            "valor": 10.0,
+            "observacao": None,
+            "metodo_pagamento": "Cartão de Crédito",
+            "cartao_id": 999999,
+            "fatura_mes": None,
+            "mes_vencimento": None,
+            "data_vencimento": None,
+            "created_at": "2026-10-11 12:00:00",
+        })
+        response, _ = self._prepare_backup_import(backup)
+        self.assertEqual(response.status_code, 302)
+        with self.app.session_transaction() as session:
+            self.assertIn(
+                "inexistente",
+                session["_flashes"][0][1],
+            )
+        conn = database.get_db_connection()
+        self.assertIsNone(
+            conn.execute("SELECT id FROM lancamentos WHERE id = 9001;").fetchone()
+        )
+        conn.close()
+
+    def test_importar_backup_ignora_lancamento_duplicado_com_id_diferente(self):
+        conn = database.get_db_connection()
+        conn.execute("""
+            INSERT INTO lancamentos (
+                data, ano_mes, descricao, categoria, valor, observacao,
+                metodo_pagamento, cartao_id, fatura_mes, mes_vencimento,
+                data_vencimento
+            ) VALUES (
+                '2026-10-10', '2026-10', 'Compra repetida', 'Outros', 25.5,
+                'nota', 'Pix', NULL, NULL, NULL, NULL
+            );
+        """)
+        conn.commit()
+        conn.close()
+        backup = models.exportar_backup_json()
+        backup["lancamentos"][0]["id"] = 5003
+        response, _ = self._prepare_backup_import(backup)
+        self.assertIn("1 lançamento(s) duplicado(s)".encode(), response.data)
+        token = self._required_match_group(
+            rb'name="token" value="([0-9a-f]{32})"', response.data
+        )
+        response = self.app.post(
+            "/configuracoes/importar-json/confirmar",
+            data={"token": token},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        conn = database.get_db_connection()
+        count = conn.execute(
+            """
+            SELECT COUNT(*) FROM lancamentos
+            WHERE descricao = 'Compra repetida';
+            """
+        ).fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 1)
+
+    def test_importar_backup_preserva_lancamentos_iguais_no_proprio_backup(self):
+        backup = models.exportar_backup_json()
+        lancamento = {
+            "data": "2026-10-10",
+            "ano_mes": "2026-10",
+            "descricao": "Compra repetida no backup",
+            "categoria": "Outros",
+            "valor": 25.5,
+            "observacao": "nota",
+            "metodo_pagamento": "Pix",
+            "cartao_id": None,
+            "fatura_mes": None,
+            "mes_vencimento": None,
+            "data_vencimento": None,
+            "created_at": "2026-10-11 12:00:00",
+        }
+        backup["lancamentos"].extend([
+            {"id": 6001, **lancamento},
+            {"id": 6002, **lancamento},
+        ])
+        response, _ = self._prepare_backup_import(backup)
+        token = self._required_match_group(
+            rb'name="token" value="([0-9a-f]{32})"', response.data
+        )
+        response = self.app.post(
+            "/configuracoes/importar-json/confirmar",
+            data={"token": token},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        conn = database.get_db_connection()
+        count = conn.execute(
+            """
+            SELECT COUNT(*) FROM lancamentos
+            WHERE descricao = 'Compra repetida no backup';
+            """
+        ).fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 2)
+
+    def test_importar_backup_falha_faz_rollback_completo(self):
+        backup = models.exportar_backup_json()
+        backup["cartoes"].append({
+            "id": 5001,
+            "nome": "Não deve permanecer",
+            "limite_total": 2500.0,
+            "fechamento_dia": 12,
+            "vencimento_dia": 22,
+            "cor": "#123456",
+            "bandeira": "Visa",
+            "ativo": 1,
+            "created_at": "2026-10-11 12:00:00",
+        })
+        response, _ = self._prepare_backup_import(backup)
+        token = self._required_match_group(
+            rb'name="token" value="([0-9a-f]{32})"', response.data
+        )
+        conn = database.get_db_connection()
+        conn.execute("""
+            CREATE TRIGGER reject_imported_test_card
+            BEFORE INSERT ON cartoes
+            WHEN NEW.id = 5001
+            BEGIN
+                SELECT RAISE(ABORT, 'simulated write failure');
+            END;
+        """)
+        conn.commit()
+        conn.close()
+        with self.assertLogs(app.logger, level="ERROR"):
+            response = self.app.post(
+                "/configuracoes/importar-json/confirmar",
+                data={"token": token},
+                follow_redirects=True,
+            )
+        self.assertIn(b"nenhuma altera", response.data.lower())
+        conn = database.get_db_connection()
+        self.assertIsNone(
+            conn.execute("SELECT id FROM cartoes WHERE id = 5001;").fetchone()
+        )
+        conn.close()
+
     def test_10_novo_lancamento_and_delete(self):
         response = self.app.post(
             "/lancamentos/novo",
@@ -143,6 +539,8 @@ class TestSmartFinance(unittest.TestCase):
         data = json.loads(response.data)
         self.assertTrue(data["success"])
         self.assertIn("SmartFinance", data["message"])
+        time.sleep(0.7)
+        mock_exit.assert_called_once_with(0)
 
     def test_12_api_categorizar_regras(self):
         casos = [
@@ -671,12 +1069,8 @@ class TestSmartFinance(unittest.TestCase):
             self.assertEqual(js.status_code, 200)
         finally:
             css.close()
-            js.close()
-        self.assertTrue(
-            database.DB_PATH.endswith(
-                os.path.join("Recursos", "Dados", "finance.db")
-            )
-        )
+            js.close(            )
+            self.assertTrue(os.path.isfile(database.DB_PATH))
 
     def test_19_migracao_reabre_pagamentos_com_lancamento_orfao(self):
         with tempfile.TemporaryDirectory() as pasta:
@@ -1017,9 +1411,9 @@ class TestSmartFinance(unittest.TestCase):
                 """, (hoje_iso, ano_mes, cartao_id, ano_mes, hoje_iso))
                 conn.execute("""
                     INSERT INTO gastos_recorrentes (
-                        descricao, valor_mensal, categoria, cartao_id
-                    ) VALUES ('Recorrência teste', 25, 'Alimentação', ?);
-                """, (cartao_id,))
+                        descricao, valor_mensal, categoria, cartao_id, mes_inicio
+                    ) VALUES ('Recorrência teste', 25, 'Alimentação', ?, ?);
+                """, (cartao_id, ano_mes))
                 conn.commit()
                 conn.close()
 

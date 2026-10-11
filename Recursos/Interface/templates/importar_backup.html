@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}SmartFinance &bull; Revisar backup{% endblock %}
+
+{% block content %}
+<div class="pt-3">
+    <div class="mb-4">
+        <h1 class="h3 fw-bold text-dark mb-1">Revisar importação do backup</h1>
+        <p class="text-muted mb-0">
+            Os dados atuais não serão substituídos por completo. Registros iguais são ignorados;
+            novos registros serão adicionados.
+        </p>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <div class="card card-clean p-3 mb-4">
+        <ul class="mb-0">
+            <li>{{ new_count }} registro(s) novo(s) para adicionar.</li>
+            <li>{{ identical_count }} registro(s) já igual(is), que serão ignorados.</li>
+            <li>{{ duplicates|length }} lançamento(s) duplicado(s) identificado(s), que serão ignorados.</li>
+            <li>{{ conflicts|length }} conflito(s) que precisam de uma decisão.</li>
+        </ul>
+    </div>
+
+    {% if duplicates %}
+    <div class="card card-clean p-3 mb-4">
+        <h2 class="h6 fw-bold">Lançamentos duplicados</h2>
+        <p class="small text-muted mb-2">
+            Estes lançamentos coincidem com registros existentes (mesma data, descrição,
+            categoria, valor e dados de pagamento) e não serão adicionados novamente.
+        </p>
+        <ul class="small mb-0">
+            {% for duplicate in duplicates %}
+            <li>{{ duplicate.label }}: {{ duplicate.current }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <form action="{{ url_for('confirmar_importacao_json') }}" method="POST">
+        <input type="hidden" name="token" value="{{ token }}">
+        {% if conflicts %}
+        <div class="d-flex flex-column gap-3 mb-4">
+            {% for conflict in conflicts %}
+            <div class="card card-clean p-3">
+                <h2 class="h6 fw-bold">{{ conflict.label }}</h2>
+                <p class="small text-muted mb-2">Este registro existe, mas os valores diferem.</p>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio"
+                           name="conflito_{{ conflict.id }}" id="atual_{{ conflict.id }}"
+                           value="current" required>
+                    <label class="form-check-label" for="atual_{{ conflict.id }}">
+                        Manter o registro atual
+                    </label>
+                    <details class="small ms-4 mb-2">
+                        <summary>Ver valores atuais</summary>
+                        <pre class="text-break text-wrap mb-0">{{ conflict.current }}</pre>
+                    </details>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio"
+                           name="conflito_{{ conflict.id }}" id="backup_{{ conflict.id }}"
+                           value="incoming" required>
+                    <label class="form-check-label" for="backup_{{ conflict.id }}">
+                        Usar os valores do backup
+                    </label>
+                    <details class="small ms-4">
+                        <summary>Ver valores do backup</summary>
+                        <pre class="text-break text-wrap mb-0">{{ conflict.incoming }}</pre>
+                    </details>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="d-flex flex-wrap gap-2">
+            <button type="submit" class="btn-action btn-primary-action"
+                    onclick="return confirm('Confirmar a mesclagem do backup? Esta ação adicionará dados e aplicará as decisões dos conflitos.');">
+                <i class="bi bi-check2-circle"></i> Confirmar importação
+            </button>
+            <a href="{{ url_for('cancelar_importacao_json', token=token) }}"
+               class="btn-action btn-neutral-action">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

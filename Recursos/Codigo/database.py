@@ -1,10 +1,137 @@
 import sqlite3
 import os
 import json
+import sys
+import tempfile
+from pathlib import Path
 from datetime import datetime, date
 import calendar
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Dados", "finance.db")
+def _get_data_dir():
+    """Returns the writable data directory for source, portable, or installed runs."""
+    configured_dir = os.environ.get("SMARTFINANCE_DATA_DIR")
+    if configured_dir:
+        return Path(configured_dir).expanduser()
+
+    if getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        if (executable_dir / ".portable").is_file():
+            return executable_dir / "Dados"
+
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise RuntimeError(
+                "A variável LOCALAPPDATA não está definida; "
+                "não foi possível determinar onde salvar os dados."
+            )
+        return Path(local_app_data) / "SmartFinance"
+
+    return Path(__file__).resolve().parents[1] / "Dados"
+
+
+DB_PATH = str(_get_data_dir() / "finance.db")
+
+
+def _legacy_db_candidates():
+    """Returns likely locations of a database from the source-code version."""
+    candidates = []
+    configured_path = os.environ.get("SMARTFINANCE_LEGACY_DB", "").strip()
+    if configured_path:
+        candidates.append(Path(configured_path).expanduser())
+
+    if getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        migration_file = executable_dir / "legacy-db-path.txt"
+        if migration_file.is_file():
+            legacy_path = migration_file.read_text(encoding="utf-8").strip()
+            if legacy_path:
+                candidates.append(Path(legacy_path).expanduser())
+
+        candidates.append(
+            executable_dir / "Recursos" / "Dados" / "finance.db"
+        )
+        candidates.append(executable_dir / "Dados" / "finance.db")
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            candidates.append(
+                Path(local_app_data) / "SmartFinance" / "finance.db"
+            )
+        document_dirs = [
+            Path.home() / "Documents",
+            Path.home() / "OneDrive" / "Documents",
+        ]
+        documents = os.environ.get("USERPROFILE")
+        if documents:
+            document_dirs.append(Path(documents) / "Documents")
+        candidates.extend(
+            directory / "SmartFinance" / "Recursos" / "Dados" / "finance.db"
+            for directory in document_dirs
+        )
+
+    seen = set()
+    for candidate in candidates:
+        normalized = os.path.normcase(str(candidate.resolve()))
+        if normalized not in seen:
+            seen.add(normalized)
+            yield candidate
+
+
+def _copy_database_without_overwriting(source, destination):
+    """Copies a SQLite database consistently, without replacing a destination."""
+    source = Path(source)
+    destination = Path(destination)
+    if not source.is_file() or source.resolve() == destination.resolve():
+        return False
+    if destination.exists():
+        return False
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f".{destination.name}.migration-",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    os.close(descriptor)
+    try:
+        source_connection = sqlite3.connect(str(source))
+        destination_connection = sqlite3.connect(temporary_path)
+        try:
+            source_connection.backup(destination_connection)
+            integrity = destination_connection.execute(
+                "PRAGMA integrity_check;"
+            ).fetchone()
+            if not integrity or integrity[0] != "ok":
+                raise sqlite3.DatabaseError(
+                    f"A cópia do banco não passou na verificação de integridade: "
+                    f"{integrity[0] if integrity else 'sem resultado'}."
+                )
+        finally:
+            destination_connection.close()
+            source_connection.close()
+
+        try:
+            if os.name == "nt":
+                os.rename(temporary_path, destination)
+            else:
+                os.link(temporary_path, destination)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+
+
+def _migrate_legacy_database():
+    """Migrates a discovered legacy database only when the new path is absent."""
+    destination = Path(DB_PATH)
+    if destination.exists():
+        return False
+
+    for source in _legacy_db_candidates():
+        if source.is_file():
+            return _copy_database_without_overwriting(source, destination)
+    return False
 
 CATEGORIAS_PADRAO = [
     ("Moradia", 1800.0, "bi-house-door", "#4f46e5"),
@@ -30,6 +157,7 @@ def get_db_connection():
 
 def init_db():
     """Inicializa as tabelas do banco de dados SQLite caso não existam."""
+    _migrate_legacy_database()
     conn = get_db_connection()
     cursor = conn.cursor()
 
