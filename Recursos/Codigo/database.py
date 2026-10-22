@@ -417,9 +417,17 @@ def init_db():
             mes_inicio TEXT NOT NULL,         -- YYYY-MM da primeira parcela/fatura
             mes_fim TEXT NOT NULL,            -- YYYY-MM da última parcela/fatura
             observacao TEXT,
+            entrada_paga INTEGER NOT NULL DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    colunas_compras_parceladas = {
+        row["name"] for row in cursor.execute("PRAGMA table_info(compras_parceladas);")
+    }
+    if "entrada_paga" not in colunas_compras_parceladas:
+        cursor.execute(
+            "ALTER TABLE compras_parceladas ADD COLUMN entrada_paga INTEGER NOT NULL DEFAULT 1;"
+        )
 
     # 6. Detalhe das Parcelas (Projeção mensal)
     cursor.execute("""
@@ -481,10 +489,18 @@ def init_db():
             cartao_id INTEGER NOT NULL REFERENCES cartoes(id) ON DELETE CASCADE,
             ano_mes TEXT NOT NULL,
             pago INTEGER NOT NULL DEFAULT 0,
+            valor_pago REAL NOT NULL DEFAULT 0.0,
             data_pagamento TEXT,
             UNIQUE(cartao_id, ano_mes)
         );
     """)
+    colunas_faturas = {
+        row["name"] for row in cursor.execute("PRAGMA table_info(faturas_pagamento);")
+    }
+    if "valor_pago" not in colunas_faturas:
+        cursor.execute(
+            "ALTER TABLE faturas_pagamento ADD COLUMN valor_pago REAL NOT NULL DEFAULT 0.0;"
+        )
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS notificacoes_pagamento (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

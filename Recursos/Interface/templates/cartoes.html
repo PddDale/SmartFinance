@@ -178,12 +178,25 @@
                     <div class="invoice-payment-bar {% if c.fatura_paga %}invoice-payment-bar-paid{% endif %}">
                         {% if c.fatura_paga %}
                             <span><i class="bi bi-check-circle-fill me-1"></i> Fatura paga</span>
+                        {% elif c.total_fatura_mes <= 0 %}
+                            <span class="text-muted">
+                                <i class="bi bi-check-circle me-1"></i> Nenhum pagamento pendente nesta fatura
+                            </span>
                         {% else %}
+                            {% if c.fatura_valor_pago %}
+                                <small class="text-muted me-2">
+                                    Pago reconhecido: {{ c.fatura_valor_pago | moeda }}
+                                </small>
+                            {% endif %}
                             <form method="POST" action="{{ url_for('pagar_fatura_cartao', id=c.id) }}">
                                 <input type="hidden" name="ano_mes" value="{{ ano_mes }}">
+                                <input type="number" name="valor_pago" class="form-control form-control-sm d-inline-block"
+                                       style="width: 150px;" min="0.01" step="0.01"
+                                       value="{{ '%.2f'|format(c.total_fatura_mes) }}"
+                                       aria-label="Valor reconhecido do pagamento da fatura">
                                 <button type="submit" class="btn btn-sm btn-outline-success rounded-pill px-3"
                                         onclick="return confirm('Confirmar esta fatura como paga?');">
-                                    <i class="bi bi-check2-circle me-1"></i> Confirmar pagamento da fatura
+                                    <i class="bi bi-check2-circle me-1"></i> Registrar pagamento
                                 </button>
                             </form>
                         {% endif %}

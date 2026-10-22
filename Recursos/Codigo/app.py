@@ -981,21 +981,34 @@ def cartoes():
             if r["status_mes"] == 1 and not r["lancamento_id"]
         ]
         cursor.execute("""
-            SELECT COALESCE(pago, 0) AS pago
+            SELECT COALESCE(pago, 0) AS pago, COALESCE(valor_pago, 0) AS valor_pago
             FROM faturas_pagamento
             WHERE cartao_id = ? AND ano_mes = ?;
         """, (cid, ano_mes))
         fatura_status = cursor.fetchone()
         c["fatura_paga"] = bool(fatura_status and fatura_status["pago"])
+        c["fatura_valor_pago"] = float(fatura_status["valor_pago"]) if fatura_status else 0.0
+        cursor.execute("""
+            SELECT COALESCE(SUM(entrada), 0.0)
+            FROM compras_parceladas
+            WHERE cartao_id = ? AND mes_inicio = ? AND entrada_paga = 0;
+        """, (cid, ano_mes))
+        entrada_fatura = float(cursor.fetchone()[0])
 
         c["total_fatura_mes"] = round(
             sum(float(x["valor"]) * (-1 if x["tipo"] in {"Estorno", "Pagamento avulso"} else 1) for x in c["itens_avulsos"]) +
             sum(float(x["valor"]) for x in c["itens_parcelas"]) +
-            sum(float(x["valor_mensal"]) for x in c["itens_recorrentes"]),
+            sum(float(x["valor_mensal"]) for x in c["itens_recorrentes"]) +
+            entrada_fatura,
             2
         )
         if c["fatura_paga"]:
             c["total_fatura_mes"] = 0.0
+        else:
+            c["total_fatura_mes"] = max(
+                0.0,
+                round(c["total_fatura_mes"] - c["fatura_valor_pago"], 2),
+            )
 
     conn.close()
 
@@ -1079,9 +1092,14 @@ def pagar_fatura_cartao(id):
         ano_mes = request.form.get("ano_mes", "")
         if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", ano_mes):
             raise ValueError("Selecione um mês válido.")
+        valor_pago_texto = request.form.get("valor_pago", "").strip()
+        valor_pago = (
+            parse_valor_localizado(valor_pago_texto)
+            if valor_pago_texto else None
+        )
         database.init_db()
-        models.marcar_fatura_paga(id, ano_mes)
-        flash("Fatura confirmada como paga. Parcelas e compras recorrentes vinculadas também foram atualizadas.", "success")
+        models.marcar_fatura_paga(id, ano_mes, valor_pago)
+        flash("Pagamento da fatura registrado; o limite será liberado pelo valor reconhecido.", "success")
     except ValueError as erro:
         flash(f"Não foi possível confirmar a fatura: {erro}", "danger")
     except sqlite3.Error:

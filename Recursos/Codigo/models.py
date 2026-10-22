@@ -208,8 +208,6 @@ def get_cartoes():
 
     hoje = date.today()
     dia_hoje = hoje.day
-    mes_atual_str = hoje.strftime("%Y-%m")
-
     cartoes = []
     for crow in cartoes_rows:
         cid = crow["id"]
@@ -217,15 +215,27 @@ def get_cartoes():
         limite_ilimitado = bool(crow["limite_ilimitado"])
         fechamento_dia = crow["fechamento_dia"]
         vencimento_dia = crow["vencimento_dia"]
+        inicio_fatura = hoje
+        if hoje.day >= fechamento_dia:
+            inicio_fatura = add_months(hoje, 1)
+        mes_atual_str = inicio_fatura.strftime("%Y-%m")
 
-        # A fatura aberta é a fatura corrente ainda não marcada como paga.
+        # Pagamentos parciais reduzem o comprometimento sem marcar a fatura
+        # como quitada; a quitação integral também atualiza os itens da fatura.
         fatura_corrente_str = mes_atual_str
         cursor.execute("""
-            SELECT COALESCE(pago, 0) AS pago FROM faturas_pagamento
+            SELECT COALESCE(pago, 0) AS pago, COALESCE(valor_pago, 0) AS valor_pago
+            FROM faturas_pagamento
             WHERE cartao_id = ? AND ano_mes = ?;
         """, (cid, fatura_corrente_str))
         fatura_status = cursor.fetchone()
         fatura_corrente_paga = bool(fatura_status and fatura_status["pago"])
+        cursor.execute("""
+            SELECT COALESCE(SUM(valor_pago), 0.0)
+            FROM faturas_pagamento
+            WHERE cartao_id = ? AND pago = 0;
+        """, (cid,))
+        pagamentos_faturas_parciais = float(cursor.fetchone()[0])
 
         cursor.execute("""
             SELECT COALESCE(SUM(CASE WHEN tipo IN ('Estorno', 'Pagamento avulso')
@@ -235,12 +245,17 @@ def get_cartoes():
         gasto_avulso_aberto = 0.0 if fatura_corrente_paga else float(cursor.fetchone()[0])
 
         # Faturas que vencem neste mês ou depois ainda comprometem o limite.
-        operador_fatura = ">" if fatura_corrente_paga else ">="
-        cursor.execute(f"""
+        cursor.execute("""
             SELECT COALESCE(SUM(CASE WHEN tipo IN ('Estorno', 'Pagamento avulso')
                 THEN -valor ELSE valor END), 0.0) FROM lancamentos
             WHERE cartao_id = ?
-                AND COALESCE(mes_vencimento, fatura_mes) {operador_fatura} ?;
+                AND COALESCE(mes_vencimento, fatura_mes) >= ?
+                AND NOT EXISTS (
+                    SELECT 1 FROM faturas_pagamento fp
+                    WHERE fp.cartao_id = lancamentos.cartao_id
+                      AND fp.ano_mes = COALESCE(lancamentos.mes_vencimento, lancamentos.fatura_mes)
+                      AND fp.pago = 1
+                );
         """, (cid, mes_atual_str))
         gasto_avulso_pendente = float(cursor.fetchone()[0])
 
@@ -248,7 +263,8 @@ def get_cartoes():
             SELECT COALESCE(SUM(p.valor), 0.0)
             FROM parcelas_detalhe p
             JOIN compras_parceladas c ON p.compra_id = c.id
-            WHERE c.cartao_id = ? AND p.ano_mes = ? AND p.status = 'Pendente';
+            WHERE c.cartao_id = ? AND p.ano_mes = ? AND p.status = 'Pendente'
+              AND p.numero_parcela > 0;
         """, (cid, fatura_corrente_str))
         gasto_parcelas_aberto = 0.0 if fatura_corrente_paga else float(cursor.fetchone()[0])
 
@@ -267,17 +283,43 @@ def get_cartoes():
 
         fatura_aberta_total = gasto_avulso_aberto + gasto_parcelas_aberto + gasto_recorrente_mes
 
-        # Faturas ainda não vencidas, recorrências e parcelas futuras comprometem o limite.
-        cursor.execute(f"""
+        # Uma recorrência ativa compromete uma cobrança futura mesmo quando a
+        # cobrança do mês corrente já foi lançada e paga. Como a recorrência é
+        # mensal e não tem data final, uma única cobrança futura é a projeção
+        # finita que deve ser reservada no limite.
+        cursor.execute("""
+            SELECT COALESCE(SUM(r.valor_mensal), 0.0)
+            FROM gastos_recorrentes r
+            LEFT JOIN recorrentes_status_mes s
+                ON s.recorrente_id = r.id AND s.ano_mes = ?
+            WHERE r.cartao_id = ?
+              AND COALESCE(r.mes_inicio, substr(r.created_at, 1, 7)) <= ?
+              AND COALESCE(s.ativo, r.ativo_padrao) = 1;
+        """, (fatura_corrente_str, cid, fatura_corrente_str))
+        recorrencias_comprometidas = float(cursor.fetchone()[0])
+
+        # Todo saldo de parcelas ainda pendente compromete o limite, não apenas
+        # a parcela do mês corrente.
+        cursor.execute("""
             SELECT COALESCE(SUM(p.valor), 0.0)
             FROM parcelas_detalhe p
             JOIN compras_parceladas c ON p.compra_id = c.id
-            WHERE c.cartao_id = ? AND p.status = 'Pendente' AND p.ano_mes {operador_fatura} ?;
-        """, (cid, mes_atual_str))
+            WHERE c.cartao_id = ? AND p.status = 'Pendente'
+              AND p.numero_parcela > 0;
+        """, (cid,))
         total_parcelas_futuras = float(cursor.fetchone()[0])
 
+        cursor.execute("""
+            SELECT COALESCE(SUM(c.entrada), 0.0)
+            FROM compras_parceladas c
+            WHERE c.cartao_id = ? AND c.entrada_paga = 0;
+        """, (cid,))
+        entradas_pendentes = float(cursor.fetchone()[0])
+
         limite_comprometido = (
-            gasto_avulso_pendente + gasto_recorrente_mes + total_parcelas_futuras
+            gasto_avulso_pendente + total_parcelas_futuras
+            + recorrencias_comprometidas
+            + entradas_pendentes - pagamentos_faturas_parciais
         )
         limite_disponivel = None if limite_ilimitado else max(0.0, limite_total - limite_comprometido)
         pct_uso = (limite_comprometido / limite_total * 100) if limite_total > 0 and not limite_ilimitado else 0.0
@@ -319,8 +361,43 @@ def get_cartoes():
     return cartoes
 
 
-def marcar_fatura_paga(cartao_id, ano_mes):
-    """Marca a fatura como paga e encerra parcelas/recorrências que a compõem."""
+def _total_fatura_pendente(cursor, cartao_id, ano_mes):
+    cursor.execute("""
+        SELECT COALESCE(SUM(CASE WHEN tipo IN ('Estorno', 'Pagamento avulso')
+            THEN -valor ELSE valor END), 0.0)
+        FROM lancamentos
+        WHERE cartao_id = ? AND mes_vencimento = ?;
+    """, (cartao_id, ano_mes))
+    total = float(cursor.fetchone()[0])
+    cursor.execute("""
+        SELECT COALESCE(SUM(p.valor), 0.0)
+        FROM parcelas_detalhe p
+        JOIN compras_parceladas c ON p.compra_id = c.id
+        WHERE c.cartao_id = ? AND p.ano_mes = ? AND p.status != 'Pago'
+          AND p.numero_parcela > 0;
+    """, (cartao_id, ano_mes))
+    total += float(cursor.fetchone()[0])
+    cursor.execute("""
+        SELECT COALESCE(SUM(r.valor_mensal), 0.0)
+        FROM gastos_recorrentes r
+        LEFT JOIN recorrentes_status_mes s
+            ON s.recorrente_id = r.id AND s.ano_mes = ?
+        WHERE r.cartao_id = ?
+          AND COALESCE(s.ativo, r.ativo_padrao) = 1
+          AND COALESCE(s.pago, 0) = 0
+          AND s.lancamento_id IS NULL;
+    """, (ano_mes, cartao_id))
+    total += float(cursor.fetchone()[0])
+    cursor.execute("""
+        SELECT COALESCE(SUM(c.entrada), 0.0)
+        FROM compras_parceladas c
+        WHERE c.cartao_id = ? AND c.mes_inicio = ? AND c.entrada_paga = 0;
+    """, (cartao_id, ano_mes))
+    return round(total + float(cursor.fetchone()[0]), 2)
+
+
+def marcar_fatura_paga(cartao_id, ano_mes, valor_pago=None):
+    """Registra pagamento integral ou parcial e libera somente o valor pago."""
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -331,12 +408,29 @@ def marcar_fatura_paga(cartao_id, ano_mes):
         )
         if not cursor.fetchone():
             raise ValueError("O cartão selecionado não existe.")
+        total_fatura = _total_fatura_pendente(cursor, cartao_id, ano_mes)
         cursor.execute("""
-            INSERT INTO faturas_pagamento (cartao_id, ano_mes, pago, data_pagamento)
-            VALUES (?, ?, 1, date('now', 'localtime'))
-            ON CONFLICT(cartao_id, ano_mes) DO UPDATE SET
-                pago = 1, data_pagamento = excluded.data_pagamento;
+            SELECT COALESCE(valor_pago, 0) AS valor_pago
+            FROM faturas_pagamento WHERE cartao_id = ? AND ano_mes = ?;
         """, (cartao_id, ano_mes))
+        registro = cursor.fetchone()
+        acumulado = float(registro["valor_pago"]) if registro else 0.0
+        valor = total_fatura if valor_pago is None else float(valor_pago)
+        if total_fatura > 0 and valor <= 0:
+            raise ValueError("Informe um pagamento entre zero e o saldo da fatura.")
+        novo_total_pago = min(total_fatura, acumulado + valor)
+        quitada = novo_total_pago >= total_fatura - 0.005
+        cursor.execute("""
+            INSERT INTO faturas_pagamento
+                (cartao_id, ano_mes, pago, valor_pago, data_pagamento)
+            VALUES (?, ?, ?, ?, date('now', 'localtime'))
+            ON CONFLICT(cartao_id, ano_mes) DO UPDATE SET
+                pago = excluded.pago, valor_pago = excluded.valor_pago,
+                data_pagamento = excluded.data_pagamento;
+        """, (cartao_id, ano_mes, 1 if quitada else 0, novo_total_pago))
+        if not quitada:
+            conn.commit()
+            return
         cursor.execute("""
             UPDATE parcelas_detalhe
             SET status = 'Pago', metodo_pagamento_pago = 'Pagamento da fatura'
@@ -347,6 +441,11 @@ def marcar_fatura_paga(cartao_id, ano_mes):
               )
               AND status != 'Pago';
         """, (ano_mes, cartao_id))
+        cursor.execute("""
+            UPDATE compras_parceladas
+            SET entrada_paga = 1
+            WHERE cartao_id = ? AND mes_inicio = ? AND entrada_paga = 0;
+        """, (cartao_id, ano_mes))
         cursor.execute("""
             INSERT INTO recorrentes_status_mes
                 (recorrente_id, ano_mes, ativo, pago, metodo_pagamento_pago)
@@ -441,6 +540,7 @@ def get_notificacoes_financeiras(data_referencia=None):
     cursor.execute("""
         SELECT c.id, c.nome, c.fechamento_dia, c.vencimento_dia,
                COALESCE(fp.pago, 0) AS fatura_paga,
+               COALESCE(fp.valor_pago, 0) AS valor_fatura_pago,
                COALESCE((
                    SELECT SUM(CASE WHEN l.tipo IN ('Estorno', 'Pagamento avulso')
                        THEN -l.valor ELSE l.valor END)
@@ -509,6 +609,9 @@ def get_notificacoes_financeiras(data_referencia=None):
             float(cartao["gastos_avulsos"] or 0)
             + float(cartao["gastos_parcelas"] or 0)
             + float(cartao["gastos_recorrentes"] or 0)
+        )
+        total_fatura = max(
+            0.0, round(total_fatura - float(cartao["valor_fatura_pago"] or 0), 2)
         )
         if hoje > data_fechamento and total_fatura == 0 and not cartao["fatura_paga"]:
             marcar_fatura_paga(cartao["id"], ano_mes)
@@ -1259,10 +1362,15 @@ def add_compra_parcelada(descricao, data_compra, valor_total, entrada, num_parce
     """, (descricao, data_compra, valor_total, entrada, num_parcelas, valor_parcela, categoria, metodo_pagamento, cartao_id, mes_inicio, mes_fim, observacao))
 
     compra_id = cursor.lastrowid
+    if metodo_pagamento == "Cartão de Crédito" and entrada > 0:
+        cursor.execute(
+            "UPDATE compras_parceladas SET entrada_paga = 0 WHERE id = ?;",
+            (compra_id,),
+        )
     gerar_parcelas_compra(cursor, compra_id, data_compra, valor_total, entrada, num_parcelas, cartao_id)
 
     # Se houve entrada em dinheiro/conta corrente, opcionalmente registrar lançamento avulso no dia
-    if entrada > 0:
+    if entrada > 0 and metodo_pagamento != "Cartão de Crédito":
         cursor.execute("""
             INSERT INTO lancamentos (data, ano_mes, descricao, categoria, valor, observacao, metodo_pagamento, mes_vencimento, data_vencimento)
             VALUES (?, ?, ?, ?, ?, ?, 'Cartão de Débito', ?, ?);
@@ -1359,12 +1467,13 @@ def update_compra_parcelada(
             SET descricao = ?, data_compra = ?, valor_total = ?, entrada = ?,
                 num_parcelas = ?, valor_parcela = ?, categoria = ?,
                 metodo_pagamento = ?, cartao_id = ?, mes_inicio = ?, mes_fim = ?,
-                observacao = ?
+                observacao = ?, entrada_paga = ?
             WHERE id = ?;
         """, (
             descricao, data_compra, valor_total, entrada, num_parcelas,
             round((valor_total - entrada) / num_parcelas, 2), categoria,
             metodo_pagamento, cartao_id, mes_inicio, mes_fim, observacao,
+            0 if metodo_pagamento == "Cartão de Crédito" and entrada > 0 else 1,
             compra_id,
         ))
 
@@ -1383,7 +1492,7 @@ def update_compra_parcelada(
             (marcador_entrada,),
         )
         lancamento_entrada = cursor.fetchone()
-        if entrada > 0:
+        if entrada > 0 and metodo_pagamento != "Cartão de Crédito":
             if lancamento_entrada:
                 cursor.execute("""
                     UPDATE lancamentos

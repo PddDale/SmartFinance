@@ -2035,6 +2035,89 @@ class TestSmartFinance(unittest.TestCase):
                 self.assertEqual(cartao["limite_comprometido"], 200)
                 self.assertEqual(cartao["limite_disponivel"], 800)
 
+    def test_limite_de_compra_parcelada_compromete_saldo_total_e_libera_pagamentos(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            with patch.object(database, "DB_PATH", os.path.join(pasta, "finance.db")):
+                database.init_db()
+                models.add_cartao("Cartão parcelado", 1000, 25, 5)
+                conn = database.get_db_connection()
+                cartao_id = conn.execute(
+                    "SELECT id FROM cartoes WHERE nome = 'Cartão parcelado';"
+                ).fetchone()["id"]
+                conn.close()
+                models.add_compra_parcelada(
+                    "Compra com entrada", date.today().isoformat(), 300, 100, 2,
+                    "Tecnologia", "Cartão de Crédito", cartao_id,
+                )
+                conn = database.get_db_connection()
+                mes_inicio = conn.execute(
+                    "SELECT mes_inicio FROM compras_parceladas;"
+                ).fetchone()["mes_inicio"]
+                conn.close()
+
+                self.assertEqual(models.get_cartoes()[0]["limite_comprometido"], 300)
+                models.marcar_fatura_paga(cartao_id, mes_inicio, 100)
+                self.assertEqual(models.get_cartoes()[0]["limite_comprometido"], 200)
+                models.marcar_fatura_paga(cartao_id, mes_inicio, 100)
+                self.assertEqual(models.get_cartoes()[0]["limite_comprometido"], 100)
+
+    def test_pagamento_parcial_e_integral_de_compra_a_vista_libera_limite(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            with patch.object(database, "DB_PATH", os.path.join(pasta, "finance.db")):
+                database.init_db()
+                models.add_cartao("Cartão à vista", 1000, 25, 5)
+                conn = database.get_db_connection()
+                cartao_id = conn.execute(
+                    "SELECT id FROM cartoes WHERE nome = 'Cartão à vista';"
+                ).fetchone()["id"]
+                conn.close()
+                models.add_lancamento(
+                    date.today().isoformat(), "Compra à vista", "Alimentação",
+                    150, "", "Cartão de Crédito", cartao_id,
+                )
+                conn = database.get_db_connection()
+                mes_fatura = conn.execute(
+                    "SELECT mes_vencimento FROM lancamentos WHERE cartao_id = ?;",
+                    (cartao_id,),
+                ).fetchone()["mes_vencimento"]
+                conn.close()
+
+                self.assertEqual(models.get_cartoes()[0]["limite_comprometido"], 150)
+                models.marcar_fatura_paga(cartao_id, mes_fatura, 50)
+                self.assertEqual(models.get_cartoes()[0]["limite_comprometido"], 100)
+                models.marcar_fatura_paga(cartao_id, mes_fatura, 100)
+                self.assertEqual(models.get_cartoes()[0]["limite_comprometido"], 0)
+
+    def test_limite_reserva_proxima_cobranca_recorrente_apos_fatura_atual_paga(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            with patch.object(database, "DB_PATH", os.path.join(pasta, "finance.db")):
+                database.init_db()
+                models.add_cartao("Cartão com recorrência", 1000, 25, 5)
+                conn = database.get_db_connection()
+                cartao_id = conn.execute(
+                    "SELECT id FROM cartoes WHERE nome = 'Cartão com recorrência';"
+                ).fetchone()["id"]
+                conn.close()
+                models.add_gasto_recorrente(
+                    "Assinatura", 319.99, "Tecnologia", 5,
+                    "Cartão de Crédito", cartao_id,
+                )
+                models.add_lancamento(
+                    date.today().isoformat(), "Compra atual", "Alimentação",
+                    100, "", "Cartão de Crédito", cartao_id,
+                )
+                conn = database.get_db_connection()
+                mes_fatura = conn.execute(
+                    "SELECT mes_vencimento FROM lancamentos WHERE descricao = 'Compra atual';"
+                ).fetchone()["mes_vencimento"]
+                conn.close()
+                models.marcar_fatura_paga(cartao_id, mes_fatura, 100)
+
+                self.assertEqual(
+                    models.get_cartoes()[0]["limite_comprometido"],
+                    319.99,
+                )
+
     def test_40_preset_de_cor_xp_disponivel_no_cadastro_e_edicao(self):
         with tempfile.TemporaryDirectory() as pasta:
             with patch.object(
