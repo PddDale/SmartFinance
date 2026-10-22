@@ -1,0 +1,97 @@
+{% set notificacoes = global_notificacoes %}
+<section class="card card-clean p-3 mb-4 border-start border-4 border-warning"
+         aria-labelledby="notificacoes-financeiras">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <h2 class="h5 fw-bold mb-0" id="notificacoes-financeiras">
+            <i class="bi bi-bell me-2"></i>Notificações
+        </h2>
+        <span class="badge bg-light text-dark border">{{ notificacoes.total }}</span>
+    </div>
+
+    {% if notificacoes.total %}
+        {% for item in notificacoes.cartoes_fechamento %}
+        <div class="border-top py-2">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-calendar2-check text-dark"></i>
+                <span>O cartão <strong>{{ item.cartao_nome }}</strong> fecha a fatura em
+                    <strong>{{ item.data | data_br }}</strong>.</span>
+            </div>
+        </div>
+        {% endfor %}
+
+        {% for item in notificacoes.cartoes_validade %}
+        <div class="border-top py-2">
+            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                <span>
+                    <i class="bi bi-credit-card me-1"></i>
+                    O cartão <strong>{{ item.nome }}</strong> expira em
+                    <strong>{{ item.validade | data_br }}</strong>.
+                </span>
+                <form method="POST" action="{{ url_for('pagar_notificacao', tipo='cartao_validade', referencia=item.id) }}">
+                    <button class="btn btn-sm btn-outline-dark rounded-pill" type="submit">
+                        <i class="bi bi-check2"></i> Marcar como paga
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+
+        {% for item in notificacoes.cartoes_pagamento %}
+        <div class="border-top py-2">
+            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                <span>
+                    <i class="bi bi-credit-card me-1"></i>
+                    A fatura do cartão <strong>{{ item.cartao_nome }}</strong>
+                    {% if item.passou_data %}venceu em{% else %}vence em{% endif %}
+                    <strong>{{ item.data | data_br }}</strong>
+                    {% if item.valor %}({{ item.valor | moeda }}){% endif %}.
+                </span>
+                <form method="POST" action="{{ url_for('pagar_fatura_cartao', id=item.cartao_id) }}">
+                    <input type="hidden" name="ano_mes" value="{{ item.ano_mes }}">
+                    <button type="submit" class="btn btn-sm btn-outline-success rounded-pill"
+                            onclick="return confirm('Confirmar esta fatura como paga?');">
+                        <i class="bi bi-check2-circle me-1"></i>Boleto pago
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+
+        {% for item in notificacoes.parcelas %}
+        <div class="border-top py-2">
+            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                <span>
+                    <i class="bi bi-calendar-range me-1"></i>
+                    Parcela <strong>{{ item.numero_parcela }}/{{ item.total_parcelas }}</strong>
+                    de <strong>{{ item.descricao }}</strong>
+                    {% if item.passou_data %}venceu em{% else %}vence em{% endif %}
+                    <strong>{{ item.data_vencimento | data_br }}</strong>
+                    ({{ item.valor | moeda }}).
+                </span>
+                <span class="badge {% if item.status == 'Pago' %}bg-light text-dark border{% else %}bg-warning text-dark{% endif %}">
+                    {{ item.mensagem_pagamento }}
+                </span>
+            </div>
+        </div>
+        {% endfor %}
+
+        {% for item in notificacoes.recorrentes %}
+        <div class="border-top py-2">
+            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                <span>
+                    <i class="bi bi-arrow-repeat me-1"></i>
+                    Pagamento recorrente <strong>{{ item.descricao }}</strong>
+                    {% if item.passou_data %}venceu em{% else %}vence em{% endif %}
+                    <strong>{{ item.dia_cobranca }}/{{ notificacoes.ano_mes[5:7] }}</strong>
+                    ({{ item.valor_mensal | moeda }}).
+                </span>
+                <span class="badge {% if item.pago %}bg-light text-dark border{% else %}bg-warning text-dark{% endif %}">
+                    {{ item.mensagem_pagamento }}
+                </span>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p class="text-muted small mb-0 border-top pt-2">Você não tem notificações pendentes para este mês.</p>
+    {% endif %}
+</section>

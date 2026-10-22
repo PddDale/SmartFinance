@@ -163,7 +163,7 @@
                                             {% if p.status == "Pago" %}
                                             <form action="{{ url_for('desfazer_pagamento_parcela', id=p.id) }}"
                                                   method="POST"
-                                                  onsubmit="return confirm('Desfazer o pagamento e remover o lançamento associado?');">
+                                                  onsubmit="return confirm('Desfazer o pagamento desta parcela?');">
                                                 <button type="submit" class="btn btn-sm btn-success rounded-pill mt-1">
                                                     <i class="bi bi-arrow-counterclockwise me-1"></i>Pago · desfazer
                                                 </button>
@@ -172,8 +172,8 @@
                                             <button type="button" class="btn btn-sm btn-outline-success rounded-pill mt-1"
                                                     data-payment-url="{{ url_for('pagar_parcela', id=p.id) }}"
                                                     data-payment-description="{{ c.descricao }} · Parcela {{ p.numero_parcela }}/{{ p.total_parcelas }}"
-                                                    data-payment-method="{{ c.metodo_pagamento }}"
-                                                    data-payment-card="{{ c.cartao_id or '' }}"
+                                                    data-payment-method="{{ 'Conta Corrente' if c.metodo_pagamento == 'Cartão de Crédito' else c.metodo_pagamento }}"
+                                                    data-payment-card="{{ '' if c.metodo_pagamento == 'Cartão de Crédito' else (c.cartao_id or '') }}"
                                                     onclick="abrirModalPagamento(this)">
                                                 <i class="bi bi-check2-circle me-1"></i>Marcar paga
                                             </button>

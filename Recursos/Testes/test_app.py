@@ -152,6 +152,51 @@ class TestSmartFinance(unittest.TestCase):
         self.assertIn(b"Acima do limite:", response.data)
         self.assertIn(b"R$ ", response.data)
 
+    def test_external_referrer_uses_safe_internal_fallback(self):
+        response = self.app.post(
+            "/lancamentos/novo",
+            data={"data": "", "descricao": "", "valor": "0"},
+            headers={"Referer": "https://attacker.example/phishing"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/lancamentos")
+
+    def test_internal_referrer_is_preserved(self):
+        response = self.app.post(
+            "/lancamentos/novo",
+            data={"data": "", "descricao": "", "valor": "0"},
+            headers={"Referer": "http://localhost/lancamentos?mes=2026-01"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.headers["Location"],
+            "/lancamentos",
+        )
+
+    def test_api_errors_do_not_expose_exception_details(self):
+        with patch.object(
+            models,
+            "classificar_despesa",
+            side_effect=RuntimeError("detalhe interno do banco"),
+        ):
+            response = self.app.post(
+                "/api/categorizar",
+                json={"descricao": "teste"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn(b"detalhe interno do banco", response.data)
+        self.assertIn(b"categorizar a despesa", response.data)
+
+    def test_secret_key_is_not_the_previous_hard_coded_value(self):
+        self.assertNotEqual(
+            app.secret_key,
+            "controle-financeiro-segredo-super-seguro",
+        )
+        self.assertTrue(app.secret_key)
+
     def test_02_lancamentos_page(self):
         response = self.app.get("/lancamentos")
         self.assertEqual(response.status_code, 200)
@@ -175,6 +220,110 @@ class TestSmartFinance(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"SmartFinance", response.data)
         self.assertIn(b"Cart", response.data)
+
+    def test_notificacoes_reunem_parcelas_recorrentes_e_cartoes(self):
+        hoje = date.today()
+        ano_mes = hoje.strftime("%Y-%m")
+        models.add_cartao("Cartão das notificações", 5000, 25, 5)
+        conn = database.get_db_connection()
+        cartao_id = conn.execute(
+            "SELECT id FROM cartoes WHERE nome = ?;",
+            ("Cartão das notificações",),
+        ).fetchone()["id"]
+        compra_id = conn.execute("""
+            INSERT INTO compras_parceladas (
+                descricao, data_compra, valor_total, entrada, num_parcelas,
+                valor_parcela, categoria, metodo_pagamento, cartao_id,
+                mes_inicio, mes_fim
+            ) VALUES (
+                'Parcela notificada', ?, 100, 0, 1, 100,
+                'Tecnologia', 'Cartão de Crédito', ?, ?, ?
+            );
+        """, (hoje.isoformat(), cartao_id, ano_mes, ano_mes)).lastrowid
+        conn.execute("""
+            INSERT INTO parcelas_detalhe (
+                compra_id, numero_parcela, total_parcelas, ano_mes, valor,
+                data_vencimento, status, metodo_pagamento_pago
+            ) VALUES (?, 1, 1, ?, 100, ?, 'Pago', 'Pagamento da fatura');
+        """, (compra_id, ano_mes, hoje.isoformat()))
+        conn.execute("""
+            INSERT INTO gastos_recorrentes (
+                descricao, valor_mensal, categoria, dia_cobranca,
+                metodo_pagamento, cartao_id, mes_inicio
+            ) VALUES ('Recorrência notificada', 30, 'Lazer', 20,
+                      'Cartão de Crédito', ?, ?);
+        """, (cartao_id, ano_mes))
+        conn.commit()
+        conn.close()
+
+        notificacoes = models.get_notificacoes_financeiras(hoje)
+        self.assertEqual(len(notificacoes["parcelas"]), 0)
+        self.assertEqual(len(notificacoes["recorrentes"]), 1)
+        self.assertEqual(
+            len([
+                item for item in notificacoes["cartoes_pagamento"]
+                if item["cartao_id"] == cartao_id
+            ]),
+            1,
+        )
+        self.assertIn(b"notificacoes-financeiras", self.app.get("/").data)
+        self.assertIn(b"notificacoes-financeiras", self.app.get("/lancamentos").data)
+
+        models.marcar_fatura_paga(cartao_id, ano_mes)
+        notificacoes = models.get_notificacoes_financeiras(hoje)
+        self.assertFalse(any(
+            item["cartao_id"] == cartao_id
+            for item in notificacoes["cartoes_pagamento"]
+        ))
+
+    def test_fatura_vazia_e_marcada_apos_fechamento(self):
+        data_referencia = date(2026, 10, 20)
+        models.add_cartao("Cartão sem compras", 1000, 19, 25)
+        conn = database.get_db_connection()
+        cartao_id = conn.execute(
+            "SELECT id FROM cartoes WHERE nome = ?;",
+            ("Cartão sem compras",),
+        ).fetchone()["id"]
+        conn.close()
+
+        models.get_notificacoes_financeiras(data_referencia)
+
+        conn = database.get_db_connection()
+        pago = conn.execute("""
+            SELECT pago FROM faturas_pagamento
+            WHERE cartao_id = ? AND ano_mes = '2026-10';
+        """, (cartao_id,)).fetchone()
+        conn.close()
+        self.assertEqual(pago["pago"], 1)
+        self.assertFalse(any(
+            item["cartao_id"] == cartao_id
+            for item in models.get_notificacoes_financeiras(data_referencia)["cartoes_pagamento"]
+        ))
+
+    def test_pagamento_de_fatura_cria_tabela_ausente_e_redireciona(self):
+        conn = database.get_db_connection()
+        conn.execute("DROP TABLE faturas_pagamento;")
+        cartao_id = conn.execute(
+            "SELECT id FROM cartoes LIMIT 1;"
+        ).fetchone()["id"]
+        conn.commit()
+        conn.close()
+
+        response = self.app.post(
+            f"/cartoes/{cartao_id}/fatura/pagar",
+            data={"ano_mes": date.today().strftime("%Y-%m")},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Fatura paga", response.data)
+        conn = database.get_db_connection()
+        pagamento = conn.execute(
+            "SELECT pago FROM faturas_pagamento WHERE cartao_id = ?;",
+            (cartao_id,),
+        ).fetchone()
+        conn.close()
+        self.assertEqual(pagamento["pago"], 1)
 
     def test_06_anual_page(self):
         response = self.app.get("/anual")
@@ -918,7 +1067,7 @@ class TestSmartFinance(unittest.TestCase):
                 self.assertEqual(lancamento["categoria"], "Alimentação")
                 self.assertAlmostEqual(lancamento["valor"], 7.18)
 
-    def test_17_pagamentos_de_parcela_e_recorrencia_geram_um_lancamento(self):
+    def test_17_pagamento_de_parcela_no_cartao_nao_cria_nova_cobranca(self):
         with tempfile.TemporaryDirectory() as pasta:
             with patch.object(
                 database, "DB_PATH", os.path.join(pasta, "finance.db")
@@ -989,9 +1138,9 @@ class TestSmartFinance(unittest.TestCase):
                     (recorrente_id, ano_mes),
                 ).fetchone()
                 conn.close()
-                self.assertEqual(total, 2)
+                self.assertEqual(total, 1)
                 self.assertEqual(parcela_pago["status"], "Pago")
-                self.assertIsNotNone(parcela_pago["lancamento_id"])
+                self.assertIsNone(parcela_pago["lancamento_id"])
                 self.assertEqual(parcela_pago["metodo_pagamento_pago"], "Pix")
                 self.assertEqual(recorrente_pago["pago"], 1)
                 self.assertIsNotNone(recorrente_pago["lancamento_id"])
@@ -999,40 +1148,14 @@ class TestSmartFinance(unittest.TestCase):
                     models.get_cartoes()[0]["limite_comprometido"], limite_antes
                 )
                 self.assertEqual(
-                    models.get_resumo_mensal(mes_parcela)["total_gastos"], 180
+                    models.get_resumo_mensal(mes_parcela)["total_gastos"], 80
                 )
                 self.assertEqual(
                     models.get_resumo_mensal(ano_mes)["total_gastos"], 80
                 )
 
                 conn = database.get_db_connection()
-                lancamento_parcela_id = parcela_pago["lancamento_id"]
                 lancamento_recorrente_id = recorrente_pago["lancamento_id"]
-                conn.close()
-
-                self.app.post(f"/lancamentos/excluir/{lancamento_parcela_id}")
-                conn = database.get_db_connection()
-                parcela_pendente = conn.execute(
-                    "SELECT status, lancamento_id FROM parcelas_detalhe WHERE id = ?;",
-                    (parcela["id"],),
-                ).fetchone()
-                self.assertEqual(parcela_pendente["status"], "Pendente")
-                self.assertIsNone(parcela_pendente["lancamento_id"])
-                self.assertIsNone(conn.execute(
-                    "SELECT id FROM lancamentos WHERE id = ?;",
-                    (lancamento_parcela_id,),
-                ).fetchone())
-                conn.close()
-
-                self.app.post(
-                    f"/parcelas/{parcela['id']}/pagar",
-                    data={"metodo_pagamento": "Pix"},
-                )
-                conn = database.get_db_connection()
-                lancamento_novo_id = conn.execute(
-                    "SELECT lancamento_id FROM parcelas_detalhe WHERE id = ?;",
-                    (parcela["id"],),
-                ).fetchone()["lancamento_id"]
                 conn.close()
                 self.app.post(
                     f"/parcelas/{parcela['id']}/desfazer-pagamento"
@@ -1044,10 +1167,6 @@ class TestSmartFinance(unittest.TestCase):
                 ).fetchone()
                 self.assertEqual(parcela_desfeita["status"], "Pendente")
                 self.assertIsNone(parcela_desfeita["lancamento_id"])
-                self.assertIsNone(conn.execute(
-                    "SELECT id FROM lancamentos WHERE id = ?;",
-                    (lancamento_novo_id,),
-                ).fetchone())
                 conn.close()
 
                 self.app.post(f"/lancamentos/excluir/{lancamento_recorrente_id}")
@@ -1072,7 +1191,36 @@ class TestSmartFinance(unittest.TestCase):
             js.close(            )
             self.assertTrue(os.path.isfile(database.DB_PATH))
 
-    def test_19_migracao_reabre_pagamentos_com_lancamento_orfao(self):
+    def test_19_nao_duplica_parcela_ao_pagar_com_o_mesmo_cartao(self):
+        models.add_cartao("Cartao da compra", 1000, 10, 20)
+        models.add_compra_parcelada(
+            "Compra parcelada", date.today().isoformat(), 200, 0, 2,
+            "Outros", "Cartão de Crédito", 1,
+        )
+        conn = database.get_db_connection()
+        parcela_id = conn.execute(
+            "SELECT id FROM parcelas_detalhe ORDER BY numero_parcela LIMIT 1;"
+        ).fetchone()["id"]
+        conn.close()
+
+        models.registrar_pagamento_parcela(parcela_id, "Cartão de Crédito", 1)
+        conn = database.get_db_connection()
+        self.assertEqual(
+            conn.execute(
+                "SELECT COUNT(*) FROM lancamentos WHERE cartao_id = 1;"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            conn.execute(
+                "SELECT status FROM parcelas_detalhe WHERE id = ?;",
+                (parcela_id,),
+            ).fetchone()["status"],
+            "Pago",
+        )
+        conn.close()
+
+    def test_20_migracao_reabre_pagamentos_com_lancamento_orfao(self):
         with tempfile.TemporaryDirectory() as pasta:
             with patch.object(
                 database, "DB_PATH", os.path.join(pasta, "finance.db")
@@ -1565,10 +1713,9 @@ class TestSmartFinance(unittest.TestCase):
 
                 response = self.app.get("/lancamentos")
                 self.assertEqual(response.status_code, 200)
-                self.assertIn(b"Pagamentos recorrentes a confirmar", response.data)
+                self.assertIn(b"Notifica", response.data)
                 self.assertIn(b"Internet teste", response.data)
-                self.assertIn(b"data-recorrente-pendente=", response.data)
-                self.assertIn(b"1 m\xc3\xaas(es) a confirmar", response.data)
+                self.assertIn(b"Pagamento pendente", response.data)
 
                 models.add_gasto_recorrente(
                     "Aluguel teste", 1200, "Moradia", 1, "Pix",
@@ -1583,20 +1730,7 @@ class TestSmartFinance(unittest.TestCase):
                 response = self.app.get("/lancamentos")
                 self.assertEqual(response.status_code, 200)
                 self.assertIn(b"Aluguel teste", response.data)
-                self.assertIn(b"5 m\xc3\xaas(es) a confirmar", response.data)
-                self.assertIn(b"data-payment-month=\"2026-06\"", response.data)
-                self.assertIn(b"data-payment-month=\"2026-10\"", response.data)
-                self.assertIn(b"2 compra(s) pendente(s)", response.data)
-                self.assertEqual(
-                    response.data.count(b"data-recorrente-pendente="),
-                    2,
-                )
-                self.assertEqual(
-                    response.data.count(
-                        f'data-recorrente-pendente="{recorrencia_retroativa}"'.encode()
-                    ),
-                    1,
-                )
+                self.assertNotIn(b"data-payment-month=", response.data)
 
                 response = self.app.post(
                     f"/recorrentes/{recorrente_id}/pagar",

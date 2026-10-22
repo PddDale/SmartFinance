@@ -32,7 +32,9 @@
         <div class="col-12 col-md-4">
             <div class="card card-clean p-3">
                 <span class="text-muted small fw-bold text-uppercase">Limite Disponível Global</span>
-                <h3 class="fw-bold text-dark mt-1 mb-0">{{ total_disponivel_global | moeda }}</h3>
+                <h3 class="fw-bold text-dark mt-1 mb-0">
+                    {% if total_disponivel_global is none %}Ilimitado{% else %}{{ total_disponivel_global | moeda }}{% endif %}
+                </h3>
                 <small class="text-muted">Crédito livre para compras</small>
             </div>
         </div>
@@ -71,7 +73,8 @@
                 <div class="mt-4">
                     <div class="d-flex justify-content-between text-white-50 small mb-1">
                         <span>Limite Utilizado</span>
-                        <span class="fw-bold text-white">{{ c.limite_comprometido | moeda }} / {{ c.limite_total | moeda }}</span>
+                        <span class="fw-bold text-white">{{ c.limite_comprometido | moeda }} /
+                            {% if c.limite_ilimitado %}Ilimitado{% else %}{{ c.limite_total | moeda }}{% endif %}</span>
                     </div>
                     <div class="progress-clean credit-card-progress" data-contrast-progress
                          role="progressbar"
@@ -84,7 +87,7 @@
                              style="width: {{ [0, [c.percentual_uso, 100] | min] | max }}%;"></div>
                     </div>
                     <div class="d-flex justify-content-between align-items-center mt-2">
-                        <small class="text-white-50">Disponível: <strong class="text-white">{{ c.limite_disponivel | moeda }}</strong></small>
+                        <small class="text-white-50">Disponível: <strong class="text-white">{% if c.limite_ilimitado %}Ilimitado{% else %}{{ c.limite_disponivel | moeda }}{% endif %}</strong></small>
                         <span class="badge bg-black bg-opacity-25 text-white">{{ c.percentual_uso }}% em uso</span>
                     </div>
                 </div>
@@ -105,7 +108,9 @@
                                     '{{ c.fechamento_dia }}',
                                     '{{ c.vencimento_dia }}',
                                     '{{ c.cor }}',
-                                    '{{ c.bandeira }}'
+                                    '{{ c.bandeira }}',
+                                    '{{ 1 if c.limite_ilimitado else 0 }}',
+                                    '{{ c.validade or "" }}'
                                 )">
                             <i class="bi bi-pencil me-1"></i>Editar
                         </button>
@@ -170,6 +175,19 @@
                             </div>
                         </button>
                     </h2>
+                    <div class="invoice-payment-bar {% if c.fatura_paga %}invoice-payment-bar-paid{% endif %}">
+                        {% if c.fatura_paga %}
+                            <span><i class="bi bi-check-circle-fill me-1"></i> Fatura paga</span>
+                        {% else %}
+                            <form method="POST" action="{{ url_for('pagar_fatura_cartao', id=c.id) }}">
+                                <input type="hidden" name="ano_mes" value="{{ ano_mes }}">
+                                <button type="submit" class="btn btn-sm btn-outline-success rounded-pill px-3"
+                                        onclick="return confirm('Confirmar esta fatura como paga?');">
+                                    <i class="bi bi-check2-circle me-1"></i> Confirmar pagamento da fatura
+                                </button>
+                            </form>
+                        {% endif %}
+                    </div>
                     <div id="collapse-{{ c.id }}" class="accordion-collapse collapse {% if loop.first %}show{% endif %}" data-bs-parent="#accordionFaturas">
                         <div class="accordion-body p-0">
                             <div class="table-responsive">
@@ -199,7 +217,9 @@
                                                     <i class="bi {{ icone }}" aria-hidden="true"></i>{{ a.categoria }}
                                                 </span>
                                             </td>
-                                            <td class="text-end fw-bold text-dark">{{ a.valor | moeda }}</td>
+                                            <td class="text-end fw-bold {% if a.tipo in ['Estorno', 'Pagamento avulso'] %}text-success{% else %}text-dark{% endif %}">
+                                                {% if a.tipo in ['Estorno', 'Pagamento avulso'] %}+{% endif %}{{ a.valor | moeda }}
+                                            </td>
                                         </tr>
                                         {% endfor %}
 
@@ -282,7 +302,11 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Limite Total (R$)</label>
-                            <input type="number" step="0.01" min="1" class="form-control fw-bold" name="limite_total" id="edit_cartao_limite" required>
+                            <input type="number" step="0.01" min="1" class="form-control fw-bold" name="limite_total" id="edit_cartao_limite">
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" name="limite_ilimitado" value="1" id="edit_limite_ilimitado">
+                                <label class="form-check-label small" for="edit_limite_ilimitado">Cartão sem limite</label>
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Bandeira</label>
@@ -293,6 +317,10 @@
                                 <option value="American Express">American Express</option>
                                 <option value="Outra">Outra</option>
                             </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-muted">Validade do cartão</label>
+                            <input type="date" class="form-control" name="validade" id="edit_cartao_validade">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Dia de Fechamento</label>

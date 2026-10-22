@@ -33,6 +33,13 @@ Var CreateStartMenuShortcut
 Var CreateDesktopShortcut
 Var MigrationDialog
 Var MigrationEdit
+Var MigrationBrowseButton
+Var MigrationExistingRadio
+Var MigrationFolderRadio
+Var MigrationEmptyRadio
+Var MigrationFolderEdit
+Var MigrationFolderButton
+Var MigrationChoice
 Var MigrationPath
 Var MigrationSourceCandidate
 
@@ -60,6 +67,7 @@ existing_install_found:
     StrCpy $INSTDIR "$LOCALAPPDATA\Programs\SmartFinance"
   ${EndIf}
   StrCpy $MigrationPath ""
+  StrCpy $MigrationChoice "empty"
   StrCpy $MigrationSourceCandidate "$DOCUMENTS\SmartFinance\Recursos\Dados\finance.db"
   IfFileExists "$MigrationSourceCandidate" migration_found
   StrCpy $MigrationSourceCandidate "$EXEDIR\..\Recursos\Dados\finance.db"
@@ -179,41 +187,79 @@ Function DirectoryPageLeave
 FunctionEnd
 
 Function MigrationPageCreate
-  ${If} $MigrationSourceCandidate == ""
+  ; Em uma atualização, o aplicativo já possui a configuração do último
+  ; local escolhido. Não recrie nem substitua essa configuração.
+  ${If} $UpgradeMode == "1"
     Abort
   ${EndIf}
-  ${If} $InstallMode == "portable"
-    IfFileExists "$INSTDIR\Dados\finance.db" migration_page_skip
-  ${Else}
-    IfFileExists "$LOCALAPPDATA\SmartFinance\finance.db" migration_page_skip
-  ${EndIf}
-  StrCpy $MigrationPath "$MigrationSourceCandidate"
-  Goto migration_page_show
-migration_page_skip:
-  StrCpy $MigrationPath ""
-  Abort
-migration_page_show:
-  ${If} $MigrationPath == ""
-    Abort
+  ${If} $MigrationSourceCandidate != ""
+    StrCpy $MigrationChoice "existing"
   ${EndIf}
   !insertmacro MUI_HEADER_TEXT "Migrar dados existentes" "Informe, se disponivel, o banco antigo do SmartFinance."
   nsDialogs::Create 1018
   Pop $MigrationDialog
-  ${NSD_CreateLabel} 0 0 100% 30u "O banco sera copiado somente se o novo destino ainda nao tiver dados. Deixe em branco para pular ou use o caminho sugerido."
+  ${NSD_CreateLabel} 0 0 100% 24u "Escolha como o SmartFinance deve iniciar. Se ja existir um banco, ele sera preservado. Tambem e possivel escolher uma pasta para procurar finance.db."
   Pop $0
-  ${NSD_CreateText} 0 38u 100% 14u "$MigrationPath"
-  Pop $MigrationEdit
+  ${If} $MigrationSourceCandidate != ""
+    ${NSD_CreateRadioButton} 0 30u 100% 14u "Usar o banco encontrado: $MigrationSourceCandidate"
+    Pop $MigrationExistingRadio
+    ${NSD_SetState} $MigrationExistingRadio ${BST_CHECKED}
+  ${EndIf}
+  ${NSD_CreateRadioButton} 0 52u 100% 14u "Comecar sem dados"
+  Pop $MigrationEmptyRadio
+  ${If} $MigrationSourceCandidate == ""
+    ${NSD_SetState} $MigrationEmptyRadio ${BST_CHECKED}
+  ${EndIf}
+  ${NSD_CreateRadioButton} 0 74u 100% 14u "Escolher uma pasta"
+  Pop $MigrationFolderRadio
+  ${NSD_CreateText} 0 96u 78% 14u ""
+  Pop $MigrationFolderEdit
+  ${NSD_CreateButton} 80% 96u 20% 14u "Selecionar pasta"
+  Pop $MigrationFolderButton
+  ${NSD_OnClick} $MigrationFolderButton MigrationBrowseFolder
+  ${NSD_CreateLabel} 0 118u 100% 26u "A pasta escolhida pode conter finance.db. Se nao contiver, um banco vazio sera criado nela."
+  Pop $0
   nsDialogs::Show
 FunctionEnd
 
-Function MigrationPageLeave
-  ${NSD_GetText} $MigrationEdit $MigrationPath
-  ${If} $MigrationPath != ""
-    IfFileExists "$MigrationPath" migration_path_valid
-    MessageBox MB_ICONEXCLAMATION|MB_OK "O arquivo indicado nao existe. Corrija o caminho ou deixe o campo vazio."
-    Abort
-  migration_path_valid:
+Function MigrationBrowseFolder
+  nsDialogs::SelectFolderDialog "Selecione a pasta que contem finance.db" "$DOCUMENTS"
+  Pop $0
+  ${If} $0 != "error"
+    ${If} $0 != ""
+      StrCpy $MigrationPath "$0\finance.db"
+      ${NSD_SetText} $MigrationFolderEdit "$0"
+      ${NSD_SetState} $MigrationFolderRadio ${BST_CHECKED}
+    ${EndIf}
   ${EndIf}
+FunctionEnd
+
+Function MigrationPageLeave
+  ${If} $MigrationSourceCandidate != ""
+    ${NSD_GetState} $MigrationExistingRadio $0
+    ${If} $0 == ${BST_CHECKED}
+      StrCpy $MigrationChoice "existing"
+      StrCpy $MigrationPath "$MigrationSourceCandidate"
+      Return
+    ${EndIf}
+  ${EndIf}
+  ${NSD_GetState} $MigrationFolderRadio $0
+  ${If} $0 == ${BST_CHECKED}
+    ${NSD_GetText} $MigrationFolderEdit $MigrationPath
+    ${If} $MigrationPath == ""
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Selecione uma pasta ou escolha Comecar sem dados."
+      Abort
+    ${EndIf}
+    StrCpy $MigrationPath "$MigrationPath\finance.db"
+    IfFileExists "$MigrationPath" migration_path_valid
+    StrCpy $MigrationChoice "folder"
+    Return
+  migration_path_valid:
+    StrCpy $MigrationChoice "folder"
+    Return
+  ${EndIf}
+  StrCpy $MigrationChoice "empty"
+  StrCpy $MigrationPath ""
 FunctionEnd
 
 Section "SmartFinance"
@@ -280,6 +326,13 @@ Section "SmartFinance"
 
 update_files_ready:
   SetOutPath "$INSTDIR"
+  ; Backups do usuário ficam fora da instalação. Remova apenas resíduos JSON
+  ; que eventualmente tenham sido incluídos em versões antigas do programa.
+  Delete "$INSTDIR\BackupSmartFin - *.json"
+  Delete "$INSTDIR\database.json"
+  Delete "$INSTDIR\backup_*.json"
+  Delete "$INSTDIR\*_backup.json"
+  Delete "$INSTDIR\*_export.json"
 
   ${If} $InstallMode == "portable"
     FileOpen $0 "$INSTDIR\.portable" w
@@ -317,6 +370,17 @@ update_files_ready:
     FileWrite $0 "$MigrationPath"
     FileClose $0
   ${EndIf}
+  ${If} $MigrationChoice == "folder"
+    ${If} $InstallMode == "portable"
+      CreateDirectory "$INSTDIR\Dados"
+      FileOpen $0 "$INSTDIR\Dados\database-location.txt" w
+    ${Else}
+      CreateDirectory "$LOCALAPPDATA\SmartFinance"
+      FileOpen $0 "$LOCALAPPDATA\SmartFinance\database-location.txt" w
+    ${EndIf}
+    FileWrite $0 "$MigrationPath"
+    FileClose $0
+  ${EndIf}
 SectionEnd
 
 Section "Uninstall"
@@ -324,5 +388,7 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\SmartFinance\SmartFinance.lnk"
   Delete "$DESKTOP\SmartFinance.lnk"
   RMDir "$SMPROGRAMS\SmartFinance"
+  SetOutPath "$TEMP"
+  Delete "$INSTDIR\*.*"
   RMDir /r "$INSTDIR"
 SectionEnd

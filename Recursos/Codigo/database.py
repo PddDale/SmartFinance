@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from datetime import datetime, date
 import calendar
+import hashlib
 
 def _get_data_dir():
     """Returns the writable data directory for source, portable, or installed runs."""
@@ -29,7 +30,128 @@ def _get_data_dir():
     return Path(__file__).resolve().parents[1] / "Dados"
 
 
-DB_PATH = str(_get_data_dir() / "finance.db")
+_DEFAULT_DATA_DIR = _get_data_dir()
+_DB_LOCATION_CONFIG = _DEFAULT_DATA_DIR / "database-location.json"
+_DB_LOCATION_TEXT_CONFIG = _DEFAULT_DATA_DIR / "database-location.txt"
+_JSON_BACKUP_PATTERNS = (
+    "BackupSmartFin - *.json",
+    "database.json",
+    "backup_*.json",
+    "*_backup.json",
+    "*_export.json",
+)
+
+
+def _load_configured_db_path():
+    """Loads the selected database path without making the database depend on itself."""
+    if not _DB_LOCATION_CONFIG.is_file():
+        if _DB_LOCATION_TEXT_CONFIG.is_file():
+            configured_path = _DB_LOCATION_TEXT_CONFIG.read_text(encoding="utf-8").strip()
+            if configured_path:
+                return Path(configured_path).expanduser()
+        return _DEFAULT_DATA_DIR / "finance.db"
+    try:
+        with _DB_LOCATION_CONFIG.open("r", encoding="utf-8") as file:
+            configured_path = json.load(file).get("database_path", "").strip()
+    except (OSError, json.JSONDecodeError, AttributeError):
+        raise RuntimeError(
+            "Não foi possível ler a configuração do local do banco de dados."
+        ) from None
+    if not configured_path:
+        return _DEFAULT_DATA_DIR / "finance.db"
+    return Path(configured_path).expanduser()
+
+
+DB_PATH = str(_load_configured_db_path())
+
+
+def find_json_backup_candidates(database_path=None):
+    """Finds known JSON backup names beside a selected database path."""
+    path = Path(database_path or DB_PATH).expanduser()
+    folder = path.parent
+    candidates = {}
+    for pattern in _JSON_BACKUP_PATTERNS:
+        for candidate in folder.glob(pattern):
+            if candidate.is_file() and candidate.name != _DB_LOCATION_CONFIG.name:
+                candidates[str(candidate.resolve())] = candidate
+    return sorted(
+        candidates.values(),
+        key=lambda candidate: candidate.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def get_database_info():
+    """Returns the active database location for the settings page."""
+    path = Path(DB_PATH).expanduser().resolve()
+    return {"path": str(path), "exists": path.is_file()}
+
+
+def database_file_is_identical(first, second):
+    """Compares two database files without opening either as the active database."""
+    first = Path(first)
+    second = Path(second)
+    if not first.is_file() or not second.is_file():
+        return False
+    return hashlib.sha256(first.read_bytes()).digest() == hashlib.sha256(second.read_bytes()).digest()
+
+
+def use_database_path(path):
+    """Makes an existing or new SQLite path the active database."""
+    global DB_PATH
+    path = Path(path).expanduser().resolve()
+    if path.suffix.lower() != ".db":
+        raise ValueError("O arquivo do banco deve terminar com .db.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        connection = sqlite3.connect(str(path))
+        try:
+            integrity = connection.execute("PRAGMA integrity_check;").fetchone()
+            if not integrity or integrity[0] != "ok":
+                raise sqlite3.DatabaseError("O arquivo escolhido não é um banco SQLite válido.")
+        finally:
+            connection.close()
+    _save_configured_db_path(path)
+    DB_PATH = str(path)
+    init_db()
+    return str(path)
+
+
+def _save_configured_db_path(path):
+    _DB_LOCATION_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = _DB_LOCATION_CONFIG.with_suffix(".tmp")
+    temporary_path.write_text(
+        json.dumps({"database_path": str(path)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(temporary_path, _DB_LOCATION_CONFIG)
+
+
+def migrate_database(destination):
+    """Copies the active database to a new path and makes that path persistent."""
+    global DB_PATH
+    destination = Path(destination).expanduser().resolve()
+    current = Path(DB_PATH).expanduser().resolve()
+    if destination == current:
+        return str(current)
+    if destination.exists():
+        raise FileExistsError(
+            "O arquivo de destino já existe. Escolha um caminho novo para evitar sobrescrevê-lo."
+        )
+    if destination.suffix.lower() != ".db":
+        raise ValueError("O caminho do banco deve terminar com .db.")
+    if not current.is_file():
+        raise FileNotFoundError("O banco de dados atual não foi encontrado.")
+    if not _copy_database_without_overwriting(current, destination):
+        raise sqlite3.DatabaseError("Não foi possível copiar o banco de dados.")
+    try:
+        _save_configured_db_path(destination)
+    except Exception:
+        if destination.exists():
+            destination.unlink()
+        raise
+    DB_PATH = str(destination)
+    return str(destination)
 
 
 def _legacy_db_candidates():
@@ -165,8 +287,8 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS configuracoes (
             id INTEGER PRIMARY KEY CHECK (id = 1),
-            salario REAL NOT NULL DEFAULT 4500.0,
-            outras_rendas REAL NOT NULL DEFAULT 500.0,
+            salario REAL NOT NULL DEFAULT 0.0,
+            outras_rendas REAL NOT NULL DEFAULT 0.0,
             saldo_conta_corrente REAL NOT NULL DEFAULT 0.0,
             valor_investido REAL NOT NULL DEFAULT 0.0,
             data_atualizacao TEXT,
@@ -237,6 +359,8 @@ def init_db():
             vencimento_dia INTEGER NOT NULL CHECK (vencimento_dia BETWEEN 1 AND 31),
             cor TEXT DEFAULT '#3b82f6',
             bandeira TEXT DEFAULT 'Mastercard',
+            validade TEXT,
+            limite_ilimitado INTEGER NOT NULL DEFAULT 0,
             ativo INTEGER DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
@@ -257,9 +381,26 @@ def init_db():
             fatura_mes TEXT,                  -- YYYY-MM (mês de fechamento/competência da fatura)
             mes_vencimento TEXT,             -- YYYY-MM (mês em que a fatura vence e deve ser paga)
             data_vencimento TEXT,            -- YYYY-MM-DD data exata de vencimento
+            tipo TEXT NOT NULL DEFAULT 'Despesa', -- Despesa, Estorno ou Pagamento avulso
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    colunas_cartoes = {
+        row["name"] for row in cursor.execute("PRAGMA table_info(cartoes);")
+    }
+    if "limite_ilimitado" not in colunas_cartoes:
+        cursor.execute(
+            "ALTER TABLE cartoes ADD COLUMN limite_ilimitado INTEGER NOT NULL DEFAULT 0;"
+        )
+    if "validade" not in colunas_cartoes:
+        cursor.execute("ALTER TABLE cartoes ADD COLUMN validade TEXT;")
+    colunas_lancamentos = {
+        row["name"] for row in cursor.execute("PRAGMA table_info(lancamentos);")
+    }
+    if "tipo" not in colunas_lancamentos:
+        cursor.execute(
+            "ALTER TABLE lancamentos ADD COLUMN tipo TEXT NOT NULL DEFAULT 'Despesa';"
+        )
     # 5. Compras Parceladas (Cabeçalho)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS compras_parceladas (
@@ -334,6 +475,25 @@ def init_db():
             UNIQUE(recorrente_id, ano_mes)
         );
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS faturas_pagamento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cartao_id INTEGER NOT NULL REFERENCES cartoes(id) ON DELETE CASCADE,
+            ano_mes TEXT NOT NULL,
+            pago INTEGER NOT NULL DEFAULT 0,
+            data_pagamento TEXT,
+            UNIQUE(cartao_id, ano_mes)
+        );
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notificacoes_pagamento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,
+            referencia TEXT NOT NULL,
+            pago INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(tipo, referencia)
+        );
+    """)
     colunas_status_recorrente = {
         row["name"] for row in cursor.execute("PRAGMA table_info(recorrentes_status_mes);")
     }
@@ -394,7 +554,7 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
             INSERT INTO configuracoes (id, salario, outras_rendas, saldo_conta_corrente, valor_investido, data_atualizacao)
-            VALUES (1, 4500.0, 500.0, 3250.0, 25400.0, datetime('now', 'localtime'));
+            VALUES (1, 0.0, 0.0, 0.0, 0.0, datetime('now', 'localtime'));
         """)
     cursor.execute("""
         UPDATE configuracoes

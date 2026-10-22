@@ -1,5 +1,5 @@
 param(
-    [string]$PythonLauncher = "py"
+    [string]$PythonLauncher = "python"
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,10 +11,12 @@ $AppDist = Join-Path $BuildStage "dist\SmartFinance"
 $SetupPath = Join-Path $ProjectRoot "dist\SmartFinance-Setup.exe"
 $TestData = Join-Path $env:TEMP ("SmartFinance-test-" + [guid]::NewGuid().ToString("N"))
 $WorkPath = Join-Path $BuildStage "work"
+$PythonLauncherName = [IO.Path]::GetFileNameWithoutExtension($PythonLauncher)
+$PythonVersionArgs = if ($PythonLauncherName -ieq "py") { @("-3.15") } else { @() }
 
 Push-Location $ProjectRoot
 try {
-    & $PythonLauncher -3.15 -m PyInstaller --version
+    & $PythonLauncher @PythonVersionArgs "-m" "PyInstaller" "--version"
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller não está disponível no Python 3.15. Instale Recursos\Dependencias\requirements-build.txt."
     }
@@ -23,7 +25,7 @@ try {
     $PreviousDataDir = $env:SMARTFINANCE_DATA_DIR
     $env:SMARTFINANCE_DATA_DIR = $TestData
     try {
-        & $PythonLauncher -3.15 -m unittest discover -s Recursos\Testes -t . -p test_app.py
+        & $PythonLauncher @PythonVersionArgs "-m" "unittest" "discover" "-s" "Recursos\Testes" "-t" "." "-p" "test_app.py"
         if ($LASTEXITCODE -ne 0) {
             throw "Os testes do SmartFinance falharam."
         }
@@ -32,7 +34,7 @@ try {
         $env:SMARTFINANCE_DATA_DIR = $PreviousDataDir
     }
 
-    & $PythonLauncher -3.15 -m PyInstaller --noconfirm --clean --distpath (Join-Path $BuildStage "dist") --workpath $WorkPath $SpecFile
+    & $PythonLauncher @PythonVersionArgs "-m" "PyInstaller" "--noconfirm" "--clean" "--distpath" (Join-Path $BuildStage "dist") "--workpath" $WorkPath $SpecFile
     if ($LASTEXITCODE -ne 0) {
         throw "O empacotamento do executável falhou."
     }

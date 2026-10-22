@@ -2,114 +2,141 @@
 
 ### Mais clareza para cuidar do seu dinheiro, no seu ritmo.
 
-O SmartFinance é um aplicativo web de finanças pessoais para acompanhar gastos, cartões, parcelas e despesas recorrentes em um só lugar. Veja um resumo da sua vida financeira, registre movimentações e consulte seus gastos ao longo do ano — com os dados guardados localmente no seu computador.
+O SmartFinance é um aplicativo de finanças pessoais para acompanhar gastos, cartões, parcelas, despesas recorrentes e receitas em um só lugar. Os dados ficam guardados localmente no seu computador.
 
-> **Privacidade:** O SmartFinance não se conecta a bancos nem envia seus dados financeiros a serviços de nuvem. A interface carrega alguns recursos visuais por CDNs externos, mas não envia seus lançamentos a esses serviços.
+> **Privacidade:** O SmartFinance não envia seus dados financeiros a serviços de nuvem ou terceiros. A interface pode carregar alguns recursos visuais  externos, mas seus lançamentos não são enviados a esses serviços.
 
-## O que você pode fazer hoje
+## Recursos
 
-Explore as principais áreas do aplicativo nas capturas de tela:
+- Dashboard com resumo financeiro.
+- Lançamentos de despesas, estornos e pagamentos avulsos.
+- Destino de entradas na conta corrente ou em um cartão específico.
+- Cartões com limite definido ou sem limite.
+- Compras parceladas e gastos recorrentes.
 
-| Visão geral | Lançamentos do dia a dia |
+## Veja o aplicativo
+
+| Visão geral | Lançamentos |
 | --- | --- |
-| **Dashboard** — acompanhe patrimônio, saldo, investimentos, renda, gastos e faturas em aberto. | **Lançamentos** — registre e filtre despesas; confirme pagamentos recorrentes vencidos. |
-| <img src="docs/images/smartfinance-dashboard.png" alt="Dashboard com indicadores financeiros e gráficos" width="100%"> | <img src="docs/images/smartfinance-lancamentos.png" alt="Tela de lançamentos e pagamentos recorrentes pendentes" width="100%"> |
+| <img src="docs/images/smartfinance-dashboard.png" alt="Dashboard do SmartFinance" width="100%"><br><br>**Dashboard:** acompanhe patrimônio, saldo, investimentos, rendas, gastos e faturas em aberto. | <img src="docs/images/smartfinance-lancamentos.png" alt="Tela de lançamentos" width="100%"><br><br>**Lançamentos:** registre despesas, estornos e pagamentos avulsos, filtre por período e confirme pagamentos recorrentes. |
+
 | Compras parceladas | Despesas recorrentes |
-| **Planejamento de parcelas** — veja o total, o que já foi quitado e o saldo a vencer de cada compra. | **Recorrências** — organize cobranças por mês e acompanhe os pagamentos ativos ao longo do ano. |
-| <img src="docs/images/smartfinance-compras-parceladas.png" alt="Lista de compras parceladas, valores e parcelas" width="100%"> | <img src="docs/images/smartfinance-recorrentes.png" alt="Tabela anual de despesas recorrentes" width="100%"> |
+| --- | --- |
+| <img src="docs/images/smartfinance-compras-parceladas.png" alt="Compras parceladas" width="100%"><br><br>**Compras parceladas:** veja o total contratado, as parcelas pagas e o saldo que ainda falta quitar. | <img src="docs/images/smartfinance-recorrentes.png" alt="Despesas recorrentes" width="100%"><br><br>**Recorrências:** organize assinaturas e contas fixas por mês e acompanhe os pagamentos ao longo do ano. |
+
 | Cartões de crédito | Visão anual |
-| **Cartões** — monitore limites disponíveis, valores comprometidos e faturas. | **Análise anual** — compare rendas e despesas mês a mês e veja a composição por categoria. |
-| <img src="docs/images/smartfinance-cartoes.png" alt="Cartões de crédito com limites, utilização e faturas" width="100%"> | <img src="docs/images/smartfinance-visao-anual.png" alt="Gráficos anuais de renda, despesas e categorias" width="100%"> |
+| --- | --- |
+| <img src="docs/images/smartfinance-cartoes.png" alt="Cartões de crédito" width="100%"><br><br>**Cartões:** monitore limites, uso, faturas, datas de fechamento e vencimento. Também é possível cadastrar cartões sem limite. | <img src="docs/images/smartfinance-visao-anual.png" alt="Visão anual" width="100%"><br><br>**Visão anual:** compare rendas e despesas mês a mês e veja como os gastos se distribuem por categoria. |
 
-Além dessas áreas, o SmartFinance permite importar compras do Excel com mapeamento de colunas e escolha do padrão decimal brasileiro (`1.234,56`) ou internacional (`1,234.56`), configurar rendas mês a mês, personalizar o formato de data e exportar ou importar backups JSON. Compras parceladas e recorrências podem ser editadas e acompanhadas sem perder os pagamentos já confirmados.
+## Instalação no Windows
 
-## O que vem pela frente
+Baixe a versão mais recente na [aba de releases do GitHub](https://github.com/PddDale/SmartFinance/releases).
 
-Estas são ideias para versões futuras; ainda não estão disponíveis no aplicativo. A ordem e o escopo podem mudar conforme o projeto evolui.
+Execute `SmartFinance-Setup.exe` e siga as instruções. O aplicativo abre no navegador e guarda os dados localmente.
 
-- [ ] **Open Finance:** estudar uma integração de leitura de transações com um provedor adequado, incluindo custos, consentimento, segurança e armazenamento dos tokens. A proposta é mostrar uma prévia para revisão antes de importar e permitir revogar a conexão.
-- [ ] **Importar extratos CSV e OFX:** carregar arquivos exportados pelo banco, revisar as transações e identificar possíveis duplicatas antes de gravar.
-- [ ] **Contas bancárias:** organizar várias contas e visualizar saldos consolidados.
-- [ ] **Categorizar lançamentos com assistência:** sugerir categorias a partir das descrições, mantendo a possibilidade de revisar e corrigir as sugestões.
-- [ ] **Tema escuro:** oferecer uma alternativa de aparência com preferência salva.
-- [ ] **Mais idiomas:** ampliar o acesso com traduções para outros idiomas.
-- [ ] **Acompanhar investimentos:** explorar uma área para organizar investimentos e acompanhar sua evolução.
+O instalador oferece uma versão instalada e, quando disponível, uma versão portátil. Na versão portátil, mantenha a pasta inteira para preservar o aplicativo e os dados.
 
-O SmartFinance ainda **não oferece conexão bancária automática**. A importação de planilhas Excel cria lançamentos locais após o mapeamento e a validação das colunas. A ideia para Open Finance é consultar transações somente após autorização da pessoa usuária — não realizar pagamentos. Uma integração desse tipo exigirá escolher um provedor e explicar com clareza quais dados são compartilhados e como são protegidos.
+O executável já inclui o necessário para executar o aplicativo; não é preciso instalar Python para usar a versão para Windows.
+
+####  Requisitos
+
+- Windows
+- Conexão com a internet para carregar alguns recursos visuais externos
+
+## Uso
+
+### Primeiros passos
+
+1. Abra o SmartFinance pelo atalho ou pelo executável. A tela inicial mostra um resumo do mês selecionado.
+2. Entre em **Configurações** e informe o ano de referência, salário, outras rendas, saldo da conta corrente e investimentos.
+3. Ainda em **Configurações**, ajuste as categorias e os limites mensais que deseja acompanhar.
+4. Cadastre seus cartões na aba **Cartões** antes de registrar compras feitas no crédito.
+
+### Dashboard
+
+Use o **Dashboard** para acompanhar:
+
+- saldo da conta corrente, investimentos e patrimônio;
+- renda, gastos e saldo líquido do mês;
+- faturas de cartão e valores comprometidos;
+- evolução dos gastos por categoria.
+
+Use o seletor de mês para consultar períodos anteriores ou futuros.
+
+### Lançamentos
+
+Na aba **Lançamentos**, clique em **Novo lançamento** para registrar uma movimentação. Informe data, descrição, categoria, valor e método de pagamento.
+
+- **Despesa:** registra um gasto normal e aparece com sinal `-`;
+- **Estorno:** registra um valor devolvido e aparece com sinal `+`;
+- **Pagamento avulso:** registra uma entrada que não faz parte de uma recorrência e aparece com sinal `+`.
+
+Para estornos e pagamentos avulsos, escolha onde o valor deve ser considerado:
+
+- **Conta Corrente** para refletir o valor na movimentação da conta;
+- **Cartão de Crédito** para associar o valor a um cartão específico e à sua fatura.
+
+Compras no cartão usam a data de fechamento e calculam automaticamente a fatura e o vencimento. Use os filtros de mês, categoria, método ou descrição para localizar registros. Cada lançamento pode ser editado ou excluído.
+
+### Cartões
+
+Na aba **Cartões**, clique em **Novo Cartão** e informe o nome, a bandeira, os dias de fechamento e vencimento e o limite. Marque **Cartão sem limite** quando o cartão não tiver um limite definido.
+
+A tela mostra o limite utilizado, o valor disponível, a fatura aberta e os lançamentos de cada cartão. Alterar os dias de fechamento ou vencimento recalcula as datas das compras já registradas.
+
+### Compras parceladas
+
+Use **Compras Parceladas** para cadastrar uma compra com entrada e número de parcelas. O SmartFinance distribui os valores pelos meses e mostra:
+
+- total da compra;
+- quantidade e valor das parcelas;
+- parcelas pagas;
+- saldo ainda pendente.
+
+Quando uma parcela for paga, registre o pagamento pela própria tela. Em compras feitas no cartão de crédito, isso apenas marca a parcela como quitada na fatura do mês e não cria uma nova compra no cartão. Para outros tipos de parcelamento, o lançamento correspondente é associado à parcela para evitar duplicidade.
+
+### Despesas recorrentes
+
+Na aba **Recorrentes**, cadastre assinaturas e contas fixas, como aluguel, internet ou serviços de streaming. Defina o valor, a categoria, o dia de cobrança e o método de pagamento.
+
+É possível ativar ou pausar uma cobrança em meses específicos. Quando uma cobrança vencer, confirme o pagamento na área de lançamentos; o SmartFinance registra o lançamento e marca aquele mês como pago.
+
+### Visão anual
+
+Use a aba **Visão Anual** para comparar os meses do ano, visualizar rendas e despesas e identificar as categorias que mais influenciaram o resultado.
+
+### Importação e backup
+
+Na aba **Lançamentos**, use **Importar Excel** para carregar uma planilha. Relacione as colunas de data, descrição e valor, escolha uma categoria padrão e revise a prévia antes de importar.
+
+Na aba **Configurações**, use **Criar backup local** para baixar uma cópia dos dados. O arquivo segue o padrão `BackupSmartFin - DDMMAAAA.json` e pode ser importado novamente pela mesma tela.
+
+O backup local é um arquivo JSON. Ao importar uma cópia, o SmartFinance mostra uma prévia, evita duplicidades e permite revisar conflitos antes de confirmar a mesclagem. Faça um backup antes de importar outro arquivo.
+
+Ao instalar ou atualizar o aplicativo e escolher uma pasta que contenha um backup `BackupSmartFin - DDMMAAAA.json` (ou um dos nomes legados reconhecidos), o SmartFinance converte automaticamente esse arquivo para o banco local. O JSON só é excluído depois que a conversão termina com sucesso; se houver qualquer erro, ele é preservado para que possa ser importado manualmente.
+
+O aplicativo começa sem dados financeiros. Na categoria **Dados e backup**, use **Selecionar caminho** para escolher uma pasta: se ela já contiver `finance.db`, esse banco poderá ser usado; caso contrário, um banco vazio será criado.
+
+Ao atualizar uma instalação existente, o instalador preserva automaticamente o último local de armazenamento do banco escolhido pelo usuário. A etapa de migração só é exibida em uma instalação nova.
+
+> Dica: faça um backup antes de excluir dados, atualizar o aplicativo ou importar uma planilha grande.
 
 ## Como funciona
 
-O aplicativo é executado localmente e abre automaticamente sua interface no navegador ao ser iniciado pelo atalho ou pelo executável. Ele usa Python e Flask na aplicação, SQLite para guardar os dados localmente e Waitress como servidor web. A interface usa HTML, CSS e JavaScript.
+O aplicativo é executado localmente e abre sua interface no navegador. O banco de dados fica no computador, sem conexão bancária automática. Faça backups periódicos e não compartilhe arquivos que contenham informações financeiras.
 
-O arquivo do banco de dados fica em `Recursos/Dados/finance.db`. Faça backups regularmente e não compartilhe esse arquivo: ele pode conter informações financeiras pessoais. A exportação JSON está disponível em **Configurações**.
+Em uma execução manual, é possível definir a variável de ambiente `SMARTFINANCE_SECRET_KEY` para fornecer a chave usada pelas sessões da interface. Se ela não for definida, o aplicativo gera uma chave aleatória ao iniciar.
 
-### Requisitos
+Enquanto uma aba do SmartFinance estiver aberta,  ela envia um sinal periódico ao aplicativo. Se todas as abas forem fechadas, o programa encerra automaticamente após 30 segundos.
 
-- Windows
-- Conexão com a internet para carregar recursos visuais externos
-
-### Executável e instalador para Windows
-
-Baixe e execute `SmartFinance-Setup.exe` para instalar o SmartFinance. Depois, inicie pelo atalho escolhido ou pelo executável instalado. O instalador oferece dois modos:
-
-- **Instalado:** instala o aplicativo em `%LOCALAPPDATA%\Programs\SmartFinance` e guarda o banco em `%LOCALAPPDATA%\SmartFinance\finance.db`. Durante a instalação, escolha se deseja atalhos no menu Iniciar, na área de trabalho, em ambos ou em nenhum. O atalho abre o aplicativo no navegador. Desinstalar o programa preserva o banco.
-- **Portátil:** instala os arquivos em uma pasta escolhida, sem atalhos nem entrada de desinstalação. Para iniciar, execute `SmartFinance.exe` nessa pasta. O banco fica em `Dados\finance.db` nessa mesma pasta; mova a pasta inteira para levar o aplicativo e os dados juntos.
-
-Ao executar novamente o instalador, ele detecta a instalação local registrada e oferece atualizar os arquivos sem alterar o banco nem os atalhos. Para atualizar uma versão portátil, escolha essa opção e selecione a pasta existente; o instalador valida o marcador portátil e mantém `Dados`. Feche o aplicativo antes de atualizar. Para uma instalação nova, a migração dos dados antigos continua disponível quando o arquivo de origem é encontrado; um banco que já exista no destino nunca é sobrescrito.
-
-Durante a instalação, pode-se informar a localização de um banco existente. O aplicativo o copia apenas se ainda não houver um banco no destino, verifica a integridade da cópia e mantém o arquivo original. Sem um caminho informado, também procura os dados da outra modalidade, `Documents\SmartFinance\Recursos\Dados\finance.db`, a pasta `Recursos\Dados` ao lado do executável e a pasta equivalente em OneDrive. Para indicar outro caminho antes de iniciar o aplicativo, defina `SMARTFINANCE_LEGACY_DB` com o caminho completo do arquivo antigo.
-
-O executável inclui Python e as dependências; quem o utiliza não precisa instalar Python. Para gerar a distribuição a partir do código, em um computador Windows com Python 3.15 e NSIS instalados, execute na raiz:
-
-```powershell
-py -3.15 -m pip install --upgrade -r Recursos\Dependencias\requirements-build.txt
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
-```
-
-O script roda os testes usando bancos temporários, empacota o aplicativo e cria `dist\SmartFinance-Setup.exe`. O uso de `-ExecutionPolicy Bypass` vale somente para esse processo e não altera a política do PowerShell no computador. A configuração de imports adiados segue o mecanismo oficial `__lazy_modules__`: Python 3.15 adia os módulos selecionados até o primeiro uso; versões anteriores continuam importando-os normalmente.
-
-Se o aplicativo já foi empacotado em `dist\SmartFinance`, o instalador NSIS também pode ser recompilado diretamente, sem parâmetros adicionais:
-
-```powershell
-Push-Location .\installer
-try { makensis .\SmartFinance.nsi } finally { Pop-Location }
-```
-
-### Backups JSON
-
-Em **Configurações**, use **Exportar JSON (Backup)** para baixar uma cópia e **Importar backup JSON** para mesclar uma cópia existente. A importação mostra uma prévia: adiciona registros novos, ignora os que já são iguais e lançamentos duplicados, e pede uma escolha para cada conflito entre os dados atuais e o backup. Nenhuma alteração é gravada até a confirmação; a mesclagem é transacional, então uma falha cancela o lote inteiro. Faça um backup antes de importar.
-
-### Encerrar
-
-Use o botão **Sair** na barra superior e escolha uma das opções apresentadas:
-
-- **Salvar e Sair** para salvar os dados e encerrar o aplicativo.
-- **Sair sem Salvar** para encerrar sem persistir as alterações pendentes.
-
-## Executar os testes
-
-Para desenvolvimento, com Python e as dependências do projeto instalados, execute na raiz:
-
-```powershell
-py -m unittest discover -s Recursos\Testes -t . -p test_app.py
-```
-
-## Estrutura do projeto
+## Estrutura
 
 ```text
 SmartFinance/
-├── README.md
-├── Recursos/
-│   ├── Codigo/          # Aplicação Flask, modelos e acesso ao banco
-│   ├── Interface/       # Templates, CSS e JavaScript
-│   ├── Dependencias/    # Dependências Python
-│   ├── Testes/          # Testes automatizados
-│   └── Dados/           # Banco SQLite local
-└── .gitignore
+├── Recursos/Codigo/          # Aplicação
+├── Recursos/Interface/       # Telas e estilos
+├── Recursos/Testes/          # Testes automatizados
+└── Recursos/Dados/           # Dados locais
 ```
 
-## Ideias, problemas e contribuições
-
-Encontrou um problema ou tem uma sugestão? Abra uma issue neste repositório descrevendo o que aconteceu ou como a ideia ajudaria. Contribuições são bem-vindas; para mudanças maiores, uma issue antes do pull request ajuda a alinhar a solução.
-
-Ao reportar um problema, não anexe extratos, credenciais, backups ou outros dados financeiros reais. Se precisar demonstrar um caso, use informações fictícias.
+Sugestões e problemas podem ser registrados na página de [issues do GitHub](https://github.com/PddDale/SmartFinance/issues).

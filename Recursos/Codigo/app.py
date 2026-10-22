@@ -1,6 +1,7 @@
 __lazy_modules__ = ("io", "json", "re", "socket", "threading", "time", "webbrowser")
 
 import os
+import secrets
 import sqlite3
 import uuid
 from datetime import datetime, date
@@ -14,6 +15,7 @@ import webbrowser
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import sys
+from urllib.parse import urlsplit
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Response
 from jinja2 import pass_context
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -36,8 +38,12 @@ app = Flask(
     template_folder=str(RESOURCE_DIR / "Interface" / "templates"),
     static_folder=str(RESOURCE_DIR / "Interface" / "static")
 )
-app.secret_key = "controle-financeiro-segredo-super-seguro"
+app.secret_key = os.environ.get("SMARTFINANCE_SECRET_KEY") or secrets.token_hex(32)
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
+_BROWSER_HEARTBEAT_TIMEOUT = 30
+_browser_heartbeat_lock = threading.Lock()
+_browser_heartbeat_at = time.monotonic()
 
 @app.errorhandler(RequestEntityTooLarge)
 def arquivo_muito_grande(_erro):
@@ -48,8 +54,40 @@ def arquivo_muito_grande(_erro):
         }), 413
     return "A requisição excede o limite de tamanho permitido.", 413
 
+# Converte o backup JSON deixado na pasta escolhida durante a instalação.
+# O arquivo só é removido depois que toda a importação é confirmada.
+_database_path_before_init = Path(database.DB_PATH).expanduser()
+_database_existed_before_init = _database_path_before_init.is_file()
+_json_backup_candidates = (
+    database.find_json_backup_candidates(_database_path_before_init)
+    if not _database_existed_before_init
+    else []
+)
+
 # Inicializar banco de dados se necessário
 database.init_db()
+
+if _json_backup_candidates and not _database_existed_before_init:
+    _json_backup = _json_backup_candidates[0]
+    try:
+        _json_raw = _json_backup.read_bytes()
+        _json_preview = backup_tools.preview_backup(_json_raw)
+        _json_decisions = {
+            conflict["id"]: "incoming"
+            for conflict in _json_preview["conflicts"]
+        }
+        backup_tools.merge_backup(
+            _json_raw,
+            decisions=_json_decisions,
+            expected_fingerprints=_json_preview["fingerprints"],
+        )
+        _json_backup.unlink()
+        app.logger.info("Backup JSON convertido para o banco local: %s", _json_backup)
+    except Exception:
+        app.logger.exception(
+            "Não foi possível converter o backup JSON %s; o arquivo foi preservado.",
+            _json_backup,
+        )
 
 @app.template_filter("moeda")
 def filter_moeda(valor):
@@ -147,6 +185,29 @@ def parse_valor_importacao(valor, formato_decimal):
         raise ValueError("Informe um valor monetário finito.")
     return float(resultado)
 
+def _safe_referrer_redirect(endpoint):
+    """Redirects to a known local page selected by the referrer path."""
+    fallback = url_for(endpoint)
+    referrer = request.referrer
+    if not referrer:
+        return redirect(fallback)
+
+    parsed = urlsplit(referrer)
+    current_origin = urlsplit(request.host_url)
+    if parsed.scheme and parsed.scheme != current_origin.scheme:
+        return redirect(fallback)
+    if parsed.netloc and parsed.netloc != current_origin.netloc:
+        return redirect(fallback)
+    allowed_paths = {
+        "/": "index",
+        "/lancamentos": "lancamentos",
+        "/parcelas": "parcelas",
+    }
+    destination_endpoint = allowed_paths.get(parsed.path)
+    if destination_endpoint is None:
+        return redirect(fallback)
+    return redirect(url_for(destination_endpoint))
+
 def _normalizar_categoria_importada(valor):
     return "".join(
         caractere.casefold() for caractere in str(valor or "")
@@ -212,7 +273,14 @@ def inject_global_data():
         "global_hoje": hoje.strftime("%Y-%m-%d"),
         "global_mes_atual": mes_atual,
         "global_ano_atual": ano_atual,
-        "global_total_faturas_abertas": total_faturas_abertas
+        "global_total_faturas_abertas": total_faturas_abertas,
+        "global_notificacoes": models.get_notificacoes_financeiras(hoje),
+        "global_data_atual": hoje.isoformat(),
+        "global_saudacao": (
+            "Bom dia" if 5 <= datetime.now().hour < 12
+            else "Boa tarde" if datetime.now().hour < 18
+            else "Boa noite"
+        ),
     }
 
 # ----------------- ROTAS PRINCIPAIS -----------------
@@ -312,17 +380,9 @@ def lancamentos():
     conn.close()
 
     total_filtrado = sum(float(i["valor"]) for i in itens)
-    pagamentos_pendentes = models.get_pagamentos_recorrentes_pendentes(hoje)
-    grupos_pagamentos_recorrentes = {}
-    for pagamento in pagamentos_pendentes:
-        grupos_pagamentos_recorrentes.setdefault(
-            pagamento["id"], []
-        ).append(pagamento)
-
     return render_template(
         "lancamentos.html",
         lancamentos=itens,
-        grupos_pagamentos_recorrentes=list(grupos_pagamentos_recorrentes.values()),
         total_filtrado=total_filtrado,
         filtro_mes=filtro_mes,
         ano_filtro_mes=filtro_mes[:4] if filtro_mes else str(hoje.year),
@@ -376,8 +436,11 @@ def previa_importacao_excel():
             "amostras": amostras,
             "total_linhas": sum(1 for linha in linhas if any(v is not None for v in linha)),
         })
-    except ValueError as erro:
-        return jsonify({"success": False, "error": str(erro)}), 400
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "A planilha não contém dados válidos para a prévia.",
+        }), 400
     except Exception:
         app.logger.exception("Erro ao ler planilha Excel enviada para prévia")
         return jsonify({"success": False, "error": "Não foi possível ler esse arquivo Excel."}), 400
@@ -486,8 +549,11 @@ def importar_excel():
             "quantidade": len(registros),
             "message": f"{len(registros)} lançamento(s) importado(s) com sucesso.",
         })
-    except ValueError as erro:
-        return jsonify({"success": False, "error": str(erro)}), 400
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "A planilha não contém dados válidos para importação.",
+        }), 400
     except Exception:
         app.logger.exception("Erro ao importar lançamentos da planilha Excel")
         return jsonify({"success": False, "error": "Não foi possível importar a planilha."}), 400
@@ -503,19 +569,21 @@ def novo_lancamento():
         observacao = request.form.get("observacao", "").strip()
         metodo = request.form.get("metodo_pagamento")
         cartao_id = request.form.get("cartao_id")
+        tipo = request.form.get("tipo", "Despesa")
 
         if not data_compra or not descricao or valor <= 0:
             flash("Preencha data, descrição e um valor positivo.", "danger")
-            return redirect(request.referrer or url_for("lancamentos"))
+            return _safe_referrer_redirect("lancamentos")
 
         cid = int(cartao_id) if cartao_id and metodo == "Cartão de Crédito" else None
 
-        models.add_lancamento(data_compra, descricao, categoria, valor, observacao, metodo, cid)
+        models.add_lancamento(data_compra, descricao, categoria, valor, observacao, metodo, cid, tipo)
         flash(f"Lançamento '{descricao}' adicionado com sucesso!", "success")
-    except Exception as e:
-        flash(f"Erro ao salvar lançamento: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao salvar lançamento")
+        flash("Não foi possível salvar o lançamento.", "danger")
 
-    return redirect(request.referrer or url_for("lancamentos"))
+    return _safe_referrer_redirect("lancamentos")
 
 @app.route("/lancamentos/editar/<int:id>", methods=["POST"])
 def editar_lancamento(id):
@@ -528,15 +596,17 @@ def editar_lancamento(id):
         observacao = request.form.get("observacao", "").strip()
         metodo = request.form.get("metodo_pagamento")
         cartao_id = request.form.get("cartao_id")
+        tipo = request.form.get("tipo", "Despesa")
 
         cid = int(cartao_id) if cartao_id and metodo == "Cartão de Crédito" else None
 
-        models.update_lancamento(id, data_compra, descricao, categoria, valor, observacao, metodo, cid)
+        models.update_lancamento(id, data_compra, descricao, categoria, valor, observacao, metodo, cid, tipo)
         flash("Lançamento atualizado com sucesso!", "success")
-    except Exception as e:
-        flash(f"Erro ao atualizar: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao atualizar lançamento %s", id)
+        flash("Não foi possível atualizar o lançamento.", "danger")
 
-    return redirect(request.referrer or url_for("lancamentos"))
+    return _safe_referrer_redirect("lancamentos")
 
 @app.route("/lancamentos/excluir/<int:id>", methods=["POST"])
 def excluir_lancamento(id):
@@ -544,10 +614,11 @@ def excluir_lancamento(id):
     try:
         models.delete_lancamento(id)
         flash("Lançamento excluído com sucesso!", "info")
-    except Exception as e:
-        flash(f"Erro ao excluir: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao excluir lançamento %s", id)
+        flash("Não foi possível excluir o lançamento.", "danger")
 
-    return redirect(request.referrer or url_for("lancamentos"))
+    return _safe_referrer_redirect("lancamentos")
 
 @app.route("/parcelas")
 def parcelas():
@@ -596,8 +667,9 @@ def nova_compra_parcelada():
 
         models.add_compra_parcelada(descricao, data_compra, valor_total, entrada, num_parcelas, categoria, metodo, cid, observacao)
         flash(f"Compra parcelada '{descricao}' cadastrada com sucesso em {num_parcelas}x!", "success")
-    except Exception as e:
-        flash(f"Erro ao salvar compra parcelada: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao salvar compra parcelada")
+        flash("Não foi possível salvar a compra parcelada.", "danger")
 
     return redirect(url_for("parcelas"))
 
@@ -632,9 +704,9 @@ def editar_compra_parcelada(id):
         flash("Compra parcelada atualizada com sucesso.", "success")
     except (TypeError, ValueError) as erro:
         flash(f"Não foi possível atualizar a compra parcelada: {erro}", "danger")
-    except Exception as erro:
+    except Exception:
         app.logger.exception("Erro ao atualizar compra parcelada %s", id)
-        flash(f"Não foi possível atualizar a compra parcelada: {erro}", "danger")
+        flash("Não foi possível atualizar a compra parcelada.", "danger")
 
     return redirect(url_for("parcelas"))
 
@@ -644,8 +716,9 @@ def excluir_compra_parcelada(id):
     try:
         models.delete_compra_parcelada(id)
         flash("Compra parcelada e todas as suas parcelas foram excluídas!", "info")
-    except Exception as e:
-        flash(f"Erro ao excluir: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao excluir compra parcelada %s", id)
+        flash("Não foi possível excluir a compra parcelada.", "danger")
 
     return redirect(url_for("parcelas"))
 
@@ -658,9 +731,12 @@ def pagar_parcela(id):
         cid = int(cartao_id) if cartao_id and metodo == "Cartão de Crédito" else None
         models.registrar_pagamento_parcela(id, metodo, cid)
         flash("Pagamento da parcela registrado nos lançamentos.", "success")
-    except Exception as erro:
-        flash(f"Não foi possível registrar o pagamento: {erro}", "danger")
-    return redirect(request.referrer or url_for("parcelas"))
+    except ValueError:
+        flash("Não foi possível registrar o pagamento da parcela.", "danger")
+    except Exception:
+        app.logger.exception("Erro ao registrar pagamento da parcela %s", id)
+        flash("Não foi possível registrar o pagamento da parcela.", "danger")
+    return _safe_referrer_redirect("parcelas")
 
 @app.route("/parcelas/<int:id>/desfazer-pagamento", methods=["POST"])
 def desfazer_pagamento_parcela(id):
@@ -668,9 +744,10 @@ def desfazer_pagamento_parcela(id):
     try:
         models.desfazer_pagamento_parcela(id)
         flash("Pagamento desfeito; parcela voltou a ficar pendente.", "success")
-    except Exception as erro:
-        flash(f"Não foi possível desfazer o pagamento: {erro}", "danger")
-    return redirect(request.referrer or url_for("parcelas"))
+    except Exception:
+        app.logger.exception("Erro ao desfazer pagamento da parcela %s", id)
+        flash("Não foi possível desfazer o pagamento da parcela.", "danger")
+    return _safe_referrer_redirect("parcelas")
 
 @app.route("/recorrentes")
 def recorrentes():
@@ -733,8 +810,9 @@ def novo_recorrente():
         )
         flash(f"Gasto recorrente '{descricao}' adicionado com sucesso!", "success")
         return redirect(url_for("recorrentes", ano=mes_inicio[:4]))
-    except Exception as e:
-        flash(f"Erro ao salvar: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao salvar gasto recorrente")
+        flash("Não foi possível salvar o gasto recorrente.", "danger")
 
     return redirect(url_for("recorrentes"))
 
@@ -755,8 +833,9 @@ def editar_recorrente(id):
 
         models.update_gasto_recorrente(id, descricao, valor_mensal, categoria, dia_cobranca, metodo, cid)
         flash("Gasto recorrente atualizado com sucesso!", "success")
-    except Exception as e:
-        flash(f"Erro ao atualizar: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao atualizar gasto recorrente %s", id)
+        flash("Não foi possível atualizar o gasto recorrente.", "danger")
 
     return redirect(url_for("recorrentes"))
 
@@ -766,8 +845,9 @@ def excluir_recorrente(id):
     try:
         models.delete_gasto_recorrente(id)
         flash("Gasto recorrente removido!", "info")
-    except Exception as e:
-        flash(f"Erro ao excluir: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao excluir gasto recorrente %s", id)
+        flash("Não foi possível excluir o gasto recorrente.", "danger")
 
     return redirect(url_for("recorrentes"))
 
@@ -782,8 +862,12 @@ def toggle_recorrente():
 
         models.toggle_recorrente_mes(recorrente_id, ano_mes, ativo)
         return jsonify({"success": True, "ativo": ativo})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        app.logger.exception("Erro ao alternar gasto recorrente")
+        return jsonify({
+            "success": False,
+            "error": "Não foi possível atualizar o gasto recorrente.",
+        }), 400
 
 @app.route("/recorrentes/<int:id>/pagar", methods=["POST"])
 def pagar_recorrente(id):
@@ -847,6 +931,7 @@ def cartoes():
             JOIN compras_parceladas cp ON p.compra_id = cp.id
             LEFT JOIN limites_categoria lim ON cp.categoria = lim.categoria
             WHERE cp.cartao_id = ? AND p.ano_mes = ? AND p.lancamento_id IS NULL
+              AND p.status = 'Pendente'
             ORDER BY p.data_vencimento ASC;
         """, (cid, ano_mes))
         c["itens_parcelas"] = [dict(r) for r in cursor.fetchall()]
@@ -859,24 +944,36 @@ def cartoes():
             FROM gastos_recorrentes r
             LEFT JOIN recorrentes_status_mes s ON r.id = s.recorrente_id AND s.ano_mes = ?
             LEFT JOIN limites_categoria lim ON r.categoria = lim.categoria
-            WHERE r.cartao_id = ?;
+            WHERE r.cartao_id = ? AND COALESCE(s.pago, 0) = 0;
         """, (ano_mes, cid))
         c["itens_recorrentes"] = [
             dict(r) for r in cursor.fetchall()
             if r["status_mes"] == 1 and not r["lancamento_id"]
         ]
+        cursor.execute("""
+            SELECT COALESCE(pago, 0) AS pago
+            FROM faturas_pagamento
+            WHERE cartao_id = ? AND ano_mes = ?;
+        """, (cid, ano_mes))
+        fatura_status = cursor.fetchone()
+        c["fatura_paga"] = bool(fatura_status and fatura_status["pago"])
 
         c["total_fatura_mes"] = round(
-            sum(float(x["valor"]) for x in c["itens_avulsos"]) +
+            sum(float(x["valor"]) * (-1 if x["tipo"] in {"Estorno", "Pagamento avulso"} else 1) for x in c["itens_avulsos"]) +
             sum(float(x["valor"]) for x in c["itens_parcelas"]) +
             sum(float(x["valor_mensal"]) for x in c["itens_recorrentes"]),
             2
         )
+        if c["fatura_paga"]:
+            c["total_fatura_mes"] = 0.0
 
     conn.close()
 
     total_limite_global = sum(c["limite_total"] for c in lista_cartoes)
-    total_disponivel_global = sum(c["limite_disponivel"] for c in lista_cartoes)
+    total_disponivel_global = (
+        None if any(c["limite_ilimitado"] for c in lista_cartoes)
+        else sum(c["limite_disponivel"] for c in lista_cartoes)
+    )
     total_comprometido_global = sum(c["limite_comprometido"] for c in lista_cartoes)
 
     return render_template(
@@ -893,20 +990,23 @@ def novo_cartao():
     """Cadastra novo cartão de crédito."""
     try:
         nome = request.form.get("nome", "").strip()
-        limite_total = parse_valor_localizado(request.form.get("limite_total", 0))
+        limite_ilimitado = request.form.get("limite_ilimitado") == "1"
+        limite_total = parse_valor_localizado(request.form.get("limite_total", 0)) if not limite_ilimitado else 0
         fechamento_dia = int(request.form.get("fechamento_dia", 25))
         vencimento_dia = int(request.form.get("vencimento_dia", 5))
         cor = request.form.get("cor", "#3b82f6")
         bandeira = request.form.get("bandeira", "Mastercard")
+        validade = request.form.get("validade", "").strip() or None
 
-        if not nome or limite_total <= 0:
-            flash("Informe nome e limite total do cartão.", "danger")
+        if not nome or (not limite_ilimitado and limite_total <= 0):
+            flash("Informe nome e limite total, ou marque o cartão como sem limite.", "danger")
             return redirect(url_for("cartoes"))
 
-        models.add_cartao(nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira)
+        models.add_cartao(nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira, limite_ilimitado, validade)
         flash(f"Cartão '{nome}' cadastrado com sucesso!", "success")
-    except Exception as e:
-        flash(f"Erro ao cadastrar cartão: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao cadastrar cartão")
+        flash("Não foi possível cadastrar o cartão.", "danger")
 
     return redirect(url_for("cartoes"))
 
@@ -915,16 +1015,19 @@ def editar_cartao(id):
     """Edita dados do cartão de crédito."""
     try:
         nome = request.form.get("nome", "").strip()
-        limite_total = parse_valor_localizado(request.form.get("limite_total", 0))
+        limite_ilimitado = request.form.get("limite_ilimitado") == "1"
+        limite_total = parse_valor_localizado(request.form.get("limite_total", 0)) if not limite_ilimitado else 0
         fechamento_dia = int(request.form.get("fechamento_dia", 25))
         vencimento_dia = int(request.form.get("vencimento_dia", 5))
         cor = request.form.get("cor", "#3b82f6")
         bandeira = request.form.get("bandeira", "Mastercard")
+        validade = request.form.get("validade", "").strip() or None
 
-        models.update_cartao(id, nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira)
+        models.update_cartao(id, nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira, limite_ilimitado, validade)
         flash("Cartão atualizado com sucesso!", "success")
-    except Exception as e:
-        flash(f"Erro ao editar cartão: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao editar cartão %s", id)
+        flash("Não foi possível editar o cartão.", "danger")
 
     return redirect(url_for("cartoes"))
 
@@ -934,10 +1037,36 @@ def excluir_cartao(id):
     try:
         models.delete_cartao(id)
         flash("Cartão excluído com sucesso!", "info")
-    except Exception as e:
-        flash(f"Erro ao excluir cartão: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao excluir cartão %s", id)
+        flash("Não foi possível excluir o cartão.", "danger")
 
     return redirect(url_for("cartoes"))
+
+@app.route("/cartoes/<int:id>/fatura/pagar", methods=["POST"])
+def pagar_fatura_cartao(id):
+    try:
+        ano_mes = request.form.get("ano_mes", "")
+        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", ano_mes):
+            raise ValueError("Selecione um mês válido.")
+        database.init_db()
+        models.marcar_fatura_paga(id, ano_mes)
+        flash("Fatura confirmada como paga. Parcelas e compras recorrentes vinculadas também foram atualizadas.", "success")
+    except ValueError as erro:
+        flash(f"Não foi possível confirmar a fatura: {erro}", "danger")
+    except sqlite3.Error:
+        app.logger.exception("Erro ao confirmar fatura do cartão %s", id)
+        flash("Não foi possível confirmar a fatura.", "danger")
+    return redirect(url_for("cartoes", mes=request.form.get("ano_mes", "")))
+
+@app.route("/notificacoes/<tipo>/<referencia>/pagar", methods=["POST"])
+def pagar_notificacao(tipo, referencia):
+    if tipo != "cartao_validade":
+        flash("Notificação inválida.", "danger")
+    else:
+        models.marcar_notificacao_paga(tipo, referencia)
+        flash("Notificação marcada como paga.", "success")
+    return _safe_referrer_redirect("index")
 
 @app.route("/anual")
 def anual():
@@ -983,7 +1112,55 @@ def configuracoes():
             "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
             "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
         ],
+        database_info=database.get_database_info(),
     )
+
+@app.route("/configuracoes/banco", methods=["POST"])
+def salvar_local_banco():
+    """Moves the SQLite database to a new user-selected path."""
+    try:
+        caminho = request.form.get("database_path", "").strip()
+        if not caminho:
+            raise ValueError("Informe o caminho completo do novo arquivo .db.")
+        novo_caminho = database.migrate_database(caminho)
+        flash(f"Banco de dados migrado com sucesso para {novo_caminho}.", "success")
+    except (OSError, ValueError, sqlite3.DatabaseError) as erro:
+        flash(f"Não foi possível migrar o banco de dados: {erro}", "danger")
+    return redirect(url_for("configuracoes"))
+
+@app.route("/configuracoes/banco/selecionar-pasta", methods=["POST"])
+def selecionar_pasta_banco():
+    """Abre o seletor de pastas do Windows para escolher o banco local."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        pasta = filedialog.askdirectory(title="Escolha a pasta do banco de dados")
+        root.destroy()
+        if not pasta:
+            return redirect(url_for("configuracoes"))
+        destino = Path(pasta) / "finance.db"
+        atual = Path(database.DB_PATH).resolve()
+        if destino.resolve() == atual:
+            flash("Esta pasta já é o local atual do banco de dados.", "info")
+        elif destino.exists() and not database.database_file_is_identical(atual, destino):
+            return render_template("escolha_banco.html", database_path=str(destino))
+        else:
+            database.use_database_path(destino)
+            flash("Local do banco de dados atualizado com sucesso.", "success")
+    except (OSError, sqlite3.Error, ValueError, ImportError) as erro:
+        flash(f"Não foi possível selecionar a pasta: {erro}", "danger")
+    return redirect(url_for("configuracoes"))
+
+@app.route("/configuracoes/banco/usar", methods=["POST"])
+def usar_banco_selecionado():
+    try:
+        database.use_database_path(request.form.get("database_path", ""))
+        flash("O banco de dados escolhido passou a ser usado.", "success")
+    except (OSError, sqlite3.Error, ValueError) as erro:
+        flash(f"Não foi possível usar o banco escolhido: {erro}", "danger")
+    return redirect(url_for("configuracoes"))
 
 @app.route("/configuracoes/salvar", methods=["POST"])
 def salvar_configuracoes():
@@ -1030,8 +1207,9 @@ def salvar_configuracoes():
             renda_variavel_mensal, rendas_mensais,
         )
         flash("Configurações e saldos atualizados com sucesso!", "success")
-    except Exception as e:
-        flash(f"Erro ao salvar configurações: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao salvar configurações")
+        flash("Não foi possível salvar as configurações.", "danger")
 
     return redirect(url_for("configuracoes"))
 
@@ -1057,10 +1235,11 @@ def salvar_saldos_rapido():
 
         models.update_saldos(saldo_cc, valor_investido)
         flash("Saldos e patrimônio atualizados!", "success")
-    except Exception as e:
-        flash(f"Erro ao atualizar saldos: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao atualizar saldos")
+        flash("Não foi possível atualizar os saldos.", "danger")
 
-    return redirect(request.referrer or url_for("index"))
+    return _safe_referrer_redirect("index")
 
 @app.route("/configuracoes/limites", methods=["POST"])
 def salvar_limites_categoria():
@@ -1080,8 +1259,9 @@ def salvar_limites_categoria():
             models.update_limite_categoria(cat, novo_limite)
 
         flash("Limites por categoria atualizados com sucesso!", "success")
-    except Exception as e:
-        flash(f"Erro ao atualizar limites: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao atualizar limites por categoria")
+        flash("Não foi possível atualizar os limites.", "danger")
 
     return redirect(url_for("configuracoes"))
 
@@ -1122,8 +1302,8 @@ def excluir_dados():
             )
         else:
             raise ValueError("Selecione um tipo de período válido.")
-    except ValueError as erro:
-        flash(str(erro), "danger")
+    except ValueError:
+        flash("Não foi possível excluir os dados com os parâmetros informados.", "danger")
     except Exception:
         app.logger.exception("Erro ao excluir dados financeiros")
         flash("Não foi possível excluir os dados. Nenhuma alteração foi confirmada.", "danger")
@@ -1136,8 +1316,9 @@ def carregar_dados_demo():
     try:
         database.popular_dados_exemplo()
         flash("Dados demonstrativos carregados com sucesso!", "success")
-    except Exception as e:
-        flash(f"Erro ao carregar dados: {str(e)}", "danger")
+    except Exception:
+        app.logger.exception("Erro ao carregar dados demonstrativos")
+        flash("Não foi possível carregar os dados demonstrativos.", "danger")
 
     return redirect(url_for("index"))
 
@@ -1149,7 +1330,7 @@ def exportar_json():
     return Response(
         json_bytes,
         mimetype="application/json",
-        headers={"Content-Disposition": f"attachment;filename=database_financeiro_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"}
+        headers={"Content-Disposition": f"attachment; filename=\"BackupSmartFin - {datetime.now().strftime('%d%m%Y')}.json\""}
     )
 
 _PENDING_BACKUP_IMPORTS = {}
@@ -1258,9 +1439,14 @@ def confirmar_importacao_json():
             staged["fingerprints"] = preview["fingerprints"]
         except (ValueError, TypeError, KeyError):
             _PENDING_BACKUP_IMPORTS.pop(token, None)
-            flash(f"Não foi possível concluir a importação: {error}", "danger")
+            app.logger.info("Prévia de backup inválida após falha na confirmação: %s", error)
+            flash("Não foi possível concluir a importação.", "danger")
             return redirect(url_for("configuracoes"))
-        return _render_backup_import_preview(token, preview, str(error))
+        return _render_backup_import_preview(
+            token,
+            preview,
+            "A importação não foi concluída; revise os conflitos e tente novamente.",
+        )
 
 @app.route("/configuracoes/importar-json/cancelar/<token>")
 def cancelar_importacao_json(token):
@@ -1300,8 +1486,12 @@ def api_calcular_fatura():
             "fechamento_dia": crow["fechamento_dia"],
             "vencimento_dia": crow["vencimento_dia"]
         })
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        app.logger.exception("Erro ao calcular fatura")
+        return jsonify({
+            "success": False,
+            "error": "Não foi possível calcular a fatura.",
+        }), 400
 
 @app.route("/api/categorizar", methods=["POST"])
 def api_categorizar():
@@ -1317,8 +1507,12 @@ def api_categorizar():
             "origem": resultado.get("origem"),
             "palavra_chave": resultado.get("palavra_chave", "")
         })
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        app.logger.exception("Erro ao categorizar despesa")
+        return jsonify({
+            "success": False,
+            "error": "Não foi possível categorizar a despesa.",
+        }), 400
 
 @app.route("/api/encerrar", methods=["POST"])
 def api_encerrar():
@@ -1350,8 +1544,29 @@ def api_encerrar():
             "salvou": salvar,
             "message": msg
         })
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception:
+        app.logger.exception("Erro ao encerrar o aplicativo")
+        return jsonify({
+            "success": False,
+            "error": "Não foi possível encerrar o aplicativo.",
+        }), 500
+
+@app.route("/api/navegador/heartbeat", methods=["POST"])
+def api_navegador_heartbeat():
+    """Registra que uma aba do SmartFinance continua aberta no navegador."""
+    with _browser_heartbeat_lock:
+        global _browser_heartbeat_at
+        _browser_heartbeat_at = time.monotonic()
+    return jsonify({"success": True})
+
+def _monitorar_navegador():
+    """Encerra o processo quando nenhuma aba envia heartbeat por 30 segundos."""
+    while True:
+        time.sleep(1)
+        with _browser_heartbeat_lock:
+            sem_heartbeat = time.monotonic() - _browser_heartbeat_at
+        if sem_heartbeat >= _BROWSER_HEARTBEAT_TIMEOUT:
+            os._exit(0)
 
 def _run_local_server():
     address = ("127.0.0.1", 5000)
@@ -1391,8 +1606,16 @@ def _run_local_server():
     else:
         raise RuntimeError("O servidor local não ficou disponível em 10 segundos.")
 
+    with _browser_heartbeat_lock:
+        global _browser_heartbeat_at
+        _browser_heartbeat_at = time.monotonic()
     if not webbrowser.open(url):
         app.logger.warning("Não foi possível abrir o navegador automaticamente: %s", url)
+    threading.Thread(
+        target=_monitorar_navegador,
+        name="smartfinance-browser-monitor",
+        daemon=True,
+    ).start()
     server_thread.join()
 
 

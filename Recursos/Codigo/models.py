@@ -214,45 +214,43 @@ def get_cartoes():
     for crow in cartoes_rows:
         cid = crow["id"]
         limite_total = float(crow["limite_total"])
+        limite_ilimitado = bool(crow["limite_ilimitado"])
         fechamento_dia = crow["fechamento_dia"]
         vencimento_dia = crow["vencimento_dia"]
 
-        # Calcular ciclo aberto atual do cartão
-        if dia_hoje >= fechamento_dia:
-            ciclo_aberto_date = add_months(date(hoje.year, hoje.month, 1), 1)
-        else:
-            ciclo_aberto_date = date(hoje.year, hoje.month, 1)
-        ciclo_aberto_str = ciclo_aberto_date.strftime("%Y-%m")
-
-        # Fatura aberta (lançamentos no ciclo de fechamento atual)
+        # A fatura aberta é a fatura corrente ainda não marcada como paga.
+        fatura_corrente_str = mes_atual_str
         cursor.execute("""
-            SELECT COALESCE(SUM(valor), 0.0) FROM lancamentos
-            WHERE cartao_id = ? AND fatura_mes = ?;
-        """, (cid, ciclo_aberto_str))
-        gasto_avulso_aberto = float(cursor.fetchone()[0])
+            SELECT COALESCE(pago, 0) AS pago FROM faturas_pagamento
+            WHERE cartao_id = ? AND ano_mes = ?;
+        """, (cid, fatura_corrente_str))
+        fatura_status = cursor.fetchone()
+        fatura_corrente_paga = bool(fatura_status and fatura_status["pago"])
+
+        cursor.execute("""
+            SELECT COALESCE(SUM(CASE WHEN tipo IN ('Estorno', 'Pagamento avulso')
+                THEN -valor ELSE valor END), 0.0) FROM lancamentos
+            WHERE cartao_id = ? AND mes_vencimento = ?;
+        """, (cid, fatura_corrente_str))
+        gasto_avulso_aberto = 0.0 if fatura_corrente_paga else float(cursor.fetchone()[0])
 
         # Faturas que vencem neste mês ou depois ainda comprometem o limite.
-        cursor.execute("""
-            SELECT COALESCE(SUM(valor), 0.0) FROM lancamentos
+        operador_fatura = ">" if fatura_corrente_paga else ">="
+        cursor.execute(f"""
+            SELECT COALESCE(SUM(CASE WHEN tipo IN ('Estorno', 'Pagamento avulso')
+                THEN -valor ELSE valor END), 0.0) FROM lancamentos
             WHERE cartao_id = ?
-                AND COALESCE(mes_vencimento, fatura_mes) >= ?;
+                AND COALESCE(mes_vencimento, fatura_mes) {operador_fatura} ?;
         """, (cid, mes_atual_str))
         gasto_avulso_pendente = float(cursor.fetchone()[0])
-
-        # Parcelas no ciclo aberto (aqui ano_mes de parcelas_detalhe é mes_vencimento)
-        # Buscar mês de vencimento correspondente ao ciclo aberto
-        _, mes_venc_aberto, dt_venc_aberto = calcular_fatura_e_vencimento(
-            ciclo_aberto_date.strftime("%Y-%m") + f"-{min(fechamento_dia - 1, 28) if fechamento_dia > 1 else 1:02d}",
-            fechamento_dia, vencimento_dia
-        )
 
         cursor.execute("""
             SELECT COALESCE(SUM(p.valor), 0.0)
             FROM parcelas_detalhe p
             JOIN compras_parceladas c ON p.compra_id = c.id
-            WHERE c.cartao_id = ? AND p.ano_mes = ? AND p.lancamento_id IS NULL;
-        """, (cid, mes_venc_aberto))
-        gasto_parcelas_aberto = float(cursor.fetchone()[0])
+            WHERE c.cartao_id = ? AND p.ano_mes = ? AND p.status = 'Pendente';
+        """, (cid, fatura_corrente_str))
+        gasto_parcelas_aberto = 0.0 if fatura_corrente_paga else float(cursor.fetchone()[0])
 
         # Recorrentes ativos alocados neste cartão
         cursor.execute("""
@@ -264,25 +262,25 @@ def get_cartoes():
                 AND COALESCE(s.ativo, r.ativo_padrao) = 1
                 AND COALESCE(s.pago, 0) = 0
                 AND s.lancamento_id IS NULL;
-        """, (ciclo_aberto_str, cid))
-        gasto_recorrente_mes = float(cursor.fetchone()[0])
+        """, (fatura_corrente_str, cid))
+        gasto_recorrente_mes = 0.0 if fatura_corrente_paga else float(cursor.fetchone()[0])
 
         fatura_aberta_total = gasto_avulso_aberto + gasto_parcelas_aberto + gasto_recorrente_mes
 
         # Faturas ainda não vencidas, recorrências e parcelas futuras comprometem o limite.
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT COALESCE(SUM(p.valor), 0.0)
             FROM parcelas_detalhe p
             JOIN compras_parceladas c ON p.compra_id = c.id
-            WHERE c.cartao_id = ? AND p.status = 'Pendente' AND p.ano_mes >= ?;
+            WHERE c.cartao_id = ? AND p.status = 'Pendente' AND p.ano_mes {operador_fatura} ?;
         """, (cid, mes_atual_str))
         total_parcelas_futuras = float(cursor.fetchone()[0])
 
         limite_comprometido = (
             gasto_avulso_pendente + gasto_recorrente_mes + total_parcelas_futuras
         )
-        limite_disponivel = max(0.0, limite_total - limite_comprometido)
-        pct_uso = (limite_comprometido / limite_total * 100) if limite_total > 0 else 0.0
+        limite_disponivel = None if limite_ilimitado else max(0.0, limite_total - limite_comprometido)
+        pct_uso = (limite_comprometido / limite_total * 100) if limite_total > 0 and not limite_ilimitado else 0.0
 
         # Datas do próximo fechamento e próximo vencimento
         # Próximo fechamento:
@@ -303,10 +301,12 @@ def get_cartoes():
             "id": cid,
             "nome": crow["nome"],
             "limite_total": limite_total,
+            "limite_ilimitado": limite_ilimitado,
             "fechamento_dia": fechamento_dia,
             "vencimento_dia": vencimento_dia,
             "cor": crow["cor"] or "#3b82f6",
             "bandeira": crow["bandeira"] or "Mastercard",
+            "validade": crow["validade"],
             "fatura_aberta": fatura_aberta_total,
             "limite_comprometido": limite_comprometido,
             "limite_disponivel": limite_disponivel,
@@ -317,6 +317,270 @@ def get_cartoes():
 
     conn.close()
     return cartoes
+
+
+def marcar_fatura_paga(cartao_id, ano_mes):
+    """Marca a fatura como paga e encerra parcelas/recorrências que a compõem."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE;")
+        cursor.execute(
+            "SELECT id FROM cartoes WHERE id = ? AND ativo = 1;",
+            (cartao_id,),
+        )
+        if not cursor.fetchone():
+            raise ValueError("O cartão selecionado não existe.")
+        cursor.execute("""
+            INSERT INTO faturas_pagamento (cartao_id, ano_mes, pago, data_pagamento)
+            VALUES (?, ?, 1, date('now', 'localtime'))
+            ON CONFLICT(cartao_id, ano_mes) DO UPDATE SET
+                pago = 1, data_pagamento = excluded.data_pagamento;
+        """, (cartao_id, ano_mes))
+        cursor.execute("""
+            UPDATE parcelas_detalhe
+            SET status = 'Pago', metodo_pagamento_pago = 'Pagamento da fatura'
+            WHERE ano_mes = ?
+              AND compra_id IN (
+                  SELECT id FROM compras_parceladas
+                  WHERE cartao_id = ?
+              )
+              AND status != 'Pago';
+        """, (ano_mes, cartao_id))
+        cursor.execute("""
+            INSERT INTO recorrentes_status_mes
+                (recorrente_id, ano_mes, ativo, pago, metodo_pagamento_pago)
+            SELECT id, ?, 1, 1, 'Pagamento da fatura'
+            FROM gastos_recorrentes
+            WHERE cartao_id = ?
+            ON CONFLICT(recorrente_id, ano_mes) DO UPDATE SET
+                pago = 1, metodo_pagamento_pago = excluded.metodo_pagamento_pago;
+        """, (ano_mes, cartao_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_notificacoes_cartoes():
+    """Retorna cartões que vencem em até cinco dias e ainda não foram confirmados."""
+    hoje = date.today()
+    limite = hoje + timedelta(days=5)
+    conn = get_db_connection()
+    rows = conn.execute("""
+        SELECT c.id, c.nome, c.validade, COALESCE(n.pago, 0) AS pago
+        FROM cartoes c
+        LEFT JOIN notificacoes_pagamento n
+          ON n.tipo = 'cartao_validade' AND n.referencia = CAST(c.id AS TEXT)
+        WHERE c.ativo = 1 AND c.validade IS NOT NULL AND c.validade != ''
+    """).fetchall()
+    conn.close()
+    notificacoes = []
+    for row in rows:
+        try:
+            validade = date.fromisoformat(row["validade"])
+        except (TypeError, ValueError):
+            continue
+        if hoje <= validade <= limite and not row["pago"]:
+            notificacoes.append(dict(row))
+    return notificacoes
+
+
+def marcar_notificacao_paga(tipo, referencia):
+    conn = get_db_connection()
+    conn.execute("""
+        INSERT INTO notificacoes_pagamento (tipo, referencia, pago)
+        VALUES (?, ?, 1)
+        ON CONFLICT(tipo, referencia) DO UPDATE SET pago = 1;
+    """, (tipo, str(referencia)))
+    conn.commit()
+    conn.close()
+
+def get_notificacoes_financeiras(data_referencia=None):
+    """Retorna parcelas, recorrências e eventos de cartão relevantes para o mês."""
+    hoje = data_referencia or date.today()
+    ano_mes = hoje.strftime("%Y-%m")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT p.id, p.numero_parcela, p.total_parcelas, p.ano_mes,
+               p.valor, p.data_vencimento, p.status,
+               p.metodo_pagamento_pago, cp.descricao, cp.cartao_id,
+               ct.nome AS cartao_nome
+        FROM parcelas_detalhe p
+        JOIN compras_parceladas cp ON cp.id = p.compra_id
+        LEFT JOIN cartoes ct ON ct.id = cp.cartao_id
+        WHERE p.ano_mes = ? AND p.status != 'Pago'
+        ORDER BY date(p.data_vencimento), cp.descricao COLLATE NOCASE;
+    """, (ano_mes,))
+    parcelas = [dict(row) for row in cursor.fetchall()]
+
+    cursor.execute("""
+        SELECT r.id, r.descricao, r.valor_mensal, r.dia_cobranca,
+               r.metodo_pagamento, r.cartao_id, ct.nome AS cartao_nome,
+               COALESCE(s.ativo, r.ativo_padrao) AS ativo,
+               COALESCE(s.pago, 0) AS pago,
+               s.metodo_pagamento_pago,
+               CASE WHEN s.lancamento_id IS NOT NULL THEN 1 ELSE 0 END
+                   AS possui_lancamento
+        FROM gastos_recorrentes r
+        LEFT JOIN cartoes ct ON ct.id = r.cartao_id
+        LEFT JOIN recorrentes_status_mes s
+            ON s.recorrente_id = r.id AND s.ano_mes = ?
+        WHERE COALESCE(r.mes_inicio, substr(r.created_at, 1, 7)) <= ?
+        ORDER BY r.dia_cobranca, r.descricao COLLATE NOCASE;
+    """, (ano_mes, ano_mes))
+    recorrentes = [
+        dict(row) for row in cursor.fetchall()
+        if row["ativo"] and not row["pago"]
+    ]
+
+    cursor.execute("""
+        SELECT c.id, c.nome, c.fechamento_dia, c.vencimento_dia,
+               COALESCE(fp.pago, 0) AS fatura_paga,
+               COALESCE((
+                   SELECT SUM(CASE WHEN l.tipo IN ('Estorno', 'Pagamento avulso')
+                       THEN -l.valor ELSE l.valor END)
+                   FROM lancamentos l
+                   WHERE l.cartao_id = c.id AND l.mes_vencimento = ?
+               ), 0) AS gastos_avulsos,
+               COALESCE((
+                   SELECT SUM(p.valor)
+                   FROM parcelas_detalhe p
+                   JOIN compras_parceladas cp ON cp.id = p.compra_id
+                   WHERE cp.cartao_id = c.id AND p.ano_mes = ?
+                     AND p.status != 'Pago'
+               ), 0) AS gastos_parcelas,
+               COALESCE((
+                   SELECT SUM(r.valor_mensal)
+                   FROM gastos_recorrentes r
+                   LEFT JOIN recorrentes_status_mes rs
+                       ON rs.recorrente_id = r.id AND rs.ano_mes = ?
+                   WHERE r.cartao_id = c.id
+                     AND COALESCE(r.mes_inicio, substr(r.created_at, 1, 7)) <= ?
+                     AND COALESCE(rs.ativo, r.ativo_padrao) = 1
+                     AND COALESCE(rs.pago, 0) = 0
+                     AND rs.lancamento_id IS NULL
+               ), 0) AS gastos_recorrentes
+        FROM cartoes c
+        LEFT JOIN faturas_pagamento fp
+            ON fp.cartao_id = c.id AND fp.ano_mes = ?
+        WHERE c.ativo = 1
+        ORDER BY c.nome COLLATE NOCASE;
+    """, (ano_mes, ano_mes, ano_mes, ano_mes, ano_mes))
+    cartoes = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    validade_notificacoes = [
+        {
+            **item,
+            "tipo": "validade_cartao",
+            "data": item["validade"],
+        }
+        for item in get_notificacoes_cartoes()
+    ]
+    fechamento_notificacoes = []
+    pagamento_notificacoes = []
+    for cartao in cartoes:
+        ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
+        data_fechamento = date(
+            hoje.year, hoje.month,
+            min(int(cartao["fechamento_dia"]), ultimo_dia),
+        )
+        data_pagamento = date(
+            hoje.year, hoje.month,
+            min(int(cartao["vencimento_dia"]), ultimo_dia),
+        )
+        if hoje <= data_fechamento:
+            fechamento_notificacoes.append({
+                "tipo": "fechamento_cartao",
+                "cartao_id": cartao["id"],
+                "cartao_nome": cartao["nome"],
+                "data": data_fechamento.isoformat(),
+                "texto": (
+                    f"O cartão {cartao['nome']} fecha a fatura em "
+                    f"{data_fechamento.isoformat()}."
+                ),
+            })
+        total_fatura = (
+            float(cartao["gastos_avulsos"] or 0)
+            + float(cartao["gastos_parcelas"] or 0)
+            + float(cartao["gastos_recorrentes"] or 0)
+        )
+        if hoje > data_fechamento and total_fatura == 0 and not cartao["fatura_paga"]:
+            marcar_fatura_paga(cartao["id"], ano_mes)
+            cartao["fatura_paga"] = 1
+
+        if not cartao["fatura_paga"]:
+            pagamento_notificacoes.append({
+                "tipo": "pagamento_cartao",
+                "cartao_id": cartao["id"],
+                "cartao_nome": cartao["nome"],
+                "ano_mes": ano_mes,
+                "data": data_pagamento.isoformat(),
+                "valor": round(total_fatura, 2),
+                "passou_data": hoje > data_pagamento,
+            })
+
+    def mensagem_pagamento(item, cartao_id=None, cartao_nome=None):
+        pago = item.get("status") == "Pago" or item.get("pago")
+        if not pago:
+            return "Pagamento pendente"
+        metodo = item.get("metodo_pagamento_pago") or item.get("metodo_pagamento")
+        nome = cartao_nome or item.get("cartao_nome")
+        if nome and metodo in {"Cartão de Crédito", "Pagamento da fatura"}:
+            return f"Pago com Cartão de Crédito {nome}"
+        return f"Pago com {metodo or 'método informado'}"
+
+    return {
+        "parcelas": [
+            {
+                **item,
+                "mensagem_pagamento": mensagem_pagamento(item),
+                "passou_data": item["data_vencimento"] < hoje.isoformat(),
+            }
+            for item in parcelas
+        ],
+        "recorrentes": [
+            {
+                **item,
+                "data_vencimento": date(
+                    hoje.year,
+                    hoje.month,
+                    min(
+                        int(item["dia_cobranca"] or 1),
+                        calendar.monthrange(hoje.year, hoje.month)[1],
+                    ),
+                ).isoformat(),
+                "mensagem_pagamento": mensagem_pagamento(
+                    item,
+                    item["cartao_id"],
+                    item["cartao_nome"],
+                ),
+                "passou_data": date(
+                    hoje.year,
+                    hoje.month,
+                    min(
+                        int(item["dia_cobranca"] or 1),
+                        calendar.monthrange(hoje.year, hoje.month)[1],
+                    ),
+                ) < hoje,
+            }
+            for item in recorrentes
+        ],
+        "cartoes_fechamento": fechamento_notificacoes,
+        "cartoes_pagamento": pagamento_notificacoes,
+        "cartoes_validade": validade_notificacoes,
+        "total": (
+            len(parcelas) + len(recorrentes)
+            + len(fechamento_notificacoes) + len(pagamento_notificacoes)
+            + len(validade_notificacoes)
+        ),
+        "ano_mes": ano_mes,
+    }
 
 def get_resumo_mensal(ano_mes):
     """
@@ -370,6 +634,8 @@ def get_resumo_mensal(ano_mes):
     for l in lancamentos_mes:
         cat = l["categoria"]
         val = float(l["valor"])
+        if l["tipo"] in {"Estorno", "Pagamento avulso"}:
+            val = -val
         total_avulsos += val
         if cat in categorias_map:
             categorias_map[cat]["gasto_avulso"] += val
@@ -393,13 +659,13 @@ def get_resumo_mensal(ano_mes):
     for p in parcelas_mes:
         cat = p["categoria"]
         val = float(p["valor"])
-        if not p["lancamento_id"]:
+        if p["status"] != "Pago" and not p["lancamento_id"]:
             total_parcelas += val
         if cat in categorias_map:
-            if not p["lancamento_id"]:
+            if p["status"] != "Pago" and not p["lancamento_id"]:
                 categorias_map[cat]["gasto_parcelas"] += val
         else:
-            if "Outros" in categorias_map and not p["lancamento_id"]:
+            if "Outros" in categorias_map and p["status"] != "Pago" and not p["lancamento_id"]:
                 categorias_map["Outros"]["gasto_parcelas"] += val
 
     # 4. Gastos Recorrentes do Mês
@@ -418,10 +684,10 @@ def get_resumo_mensal(ano_mes):
     for r in recorrentes_todos:
         if r["status_mes"] == 1:
             val = float(r["valor_mensal"])
-            if not r["lancamento_id"]:
+            if not r["lancamento_id"] and not r["pago"]:
                 total_recorrentes += val
             cat = r["categoria"]
-            if not r["lancamento_id"]:
+            if not r["lancamento_id"] and not r["pago"]:
                 if cat in categorias_map:
                     categorias_map[cat]["gasto_recorrente"] += val
                 elif "Outros" in categorias_map:
@@ -467,7 +733,9 @@ def get_resumo_mensal(ano_mes):
     for c in cartoes_db:
         cid = c["id"]
         # Lançamentos avulsos deste cartão que vencem neste mês
-        cursor.execute("SELECT COALESCE(SUM(valor), 0.0) FROM lancamentos WHERE cartao_id = ? AND mes_vencimento = ?;", (cid, ano_mes))
+        cursor.execute("""SELECT COALESCE(SUM(CASE WHEN tipo IN ('Estorno', 'Pagamento avulso')
+            THEN -valor ELSE valor END), 0.0)
+            FROM lancamentos WHERE cartao_id = ? AND mes_vencimento = ?;""", (cid, ano_mes))
         v_avulsos = float(cursor.fetchone()[0])
 
         # Parcelas deste cartão que vencem neste mês
@@ -475,7 +743,7 @@ def get_resumo_mensal(ano_mes):
             SELECT COALESCE(SUM(p.valor), 0.0)
             FROM parcelas_detalhe p
             JOIN compras_parceladas cp ON p.compra_id = cp.id
-            WHERE cp.cartao_id = ? AND p.ano_mes = ? AND p.lancamento_id IS NULL;
+            WHERE cp.cartao_id = ? AND p.ano_mes = ? AND p.status = 'Pendente';
         """, (cid, ano_mes))
         v_parc = float(cursor.fetchone()[0])
 
@@ -610,7 +878,7 @@ def get_visao_anual(ano):
 
 # ----------------- OPERAÇÕES CRUD -----------------
 
-def add_lancamento(data_compra, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id=None):
+def add_lancamento(data_compra, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id=None, tipo="Despesa"):
     """Insere um novo gasto avulso calculando automaticamente o mês e a fatura."""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -620,6 +888,8 @@ def add_lancamento(data_compra, descricao, categoria, valor, observacao, metodo_
     mes_vencimento = ano_mes
     data_vencimento = data_compra
 
+    if tipo not in {"Despesa", "Estorno", "Pagamento avulso"}:
+        raise ValueError("Selecione um tipo de lançamento válido.")
     if metodo_pagamento == "Cartão de Crédito":
         if not cartao_id:
             conn.close()
@@ -635,18 +905,21 @@ def add_lancamento(data_compra, descricao, categoria, valor, observacao, metodo_
         fatura_mes, mes_vencimento, data_vencimento = calcular_fatura_e_vencimento(
             data_compra, crow["fechamento_dia"], crow["vencimento_dia"]
         )
+    elif metodo_pagamento not in {"Cartão de Débito", "Pix", "Dinheiro", "Conta Corrente"}:
+        conn.close()
+        raise ValueError("Selecione um método de pagamento válido.")
     else:
         cartao_id = None
 
     cursor.execute("""
-        INSERT INTO lancamentos (data, ano_mes, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id, fatura_mes, mes_vencimento, data_vencimento)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-    """, (data_compra, ano_mes, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id, fatura_mes, mes_vencimento, data_vencimento))
+        INSERT INTO lancamentos (data, ano_mes, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id, fatura_mes, mes_vencimento, data_vencimento, tipo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """, (data_compra, ano_mes, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id, fatura_mes, mes_vencimento, data_vencimento, tipo))
 
     conn.commit()
     conn.close()
 
-def update_lancamento(lancamento_id, data_compra, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id=None):
+def update_lancamento(lancamento_id, data_compra, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id=None, tipo="Despesa"):
     """Atualiza um gasto avulso recalculando fatura e vencimentos."""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -656,6 +929,8 @@ def update_lancamento(lancamento_id, data_compra, descricao, categoria, valor, o
     mes_vencimento = ano_mes
     data_vencimento = data_compra
 
+    if tipo not in {"Despesa", "Estorno", "Pagamento avulso"}:
+        raise ValueError("Selecione um tipo de lançamento válido.")
     if metodo_pagamento == "Cartão de Crédito":
         if not cartao_id:
             conn.close()
@@ -671,15 +946,18 @@ def update_lancamento(lancamento_id, data_compra, descricao, categoria, valor, o
         fatura_mes, mes_vencimento, data_vencimento = calcular_fatura_e_vencimento(
             data_compra, crow["fechamento_dia"], crow["vencimento_dia"]
         )
+    elif metodo_pagamento not in {"Cartão de Débito", "Pix", "Dinheiro", "Conta Corrente"}:
+        conn.close()
+        raise ValueError("Selecione um método de pagamento válido.")
     else:
         cartao_id = None
 
     cursor.execute("""
         UPDATE lancamentos
         SET data = ?, ano_mes = ?, descricao = ?, categoria = ?, valor = ?, observacao = ?,
-            metodo_pagamento = ?, cartao_id = ?, fatura_mes = ?, mes_vencimento = ?, data_vencimento = ?
+            metodo_pagamento = ?, cartao_id = ?, fatura_mes = ?, mes_vencimento = ?, data_vencimento = ?, tipo = ?
         WHERE id = ?;
-    """, (data_compra, ano_mes, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id, fatura_mes, mes_vencimento, data_vencimento, lancamento_id))
+    """, (data_compra, ano_mes, descricao, categoria, valor, observacao, metodo_pagamento, cartao_id, fatura_mes, mes_vencimento, data_vencimento, tipo, lancamento_id))
 
     conn.commit()
     conn.close()
@@ -719,7 +997,7 @@ def _inserir_lancamento(
     mes_vencimento = ano_mes
     data_vencimento = data_compra
     if metodo_pagamento not in {
-        "Cartão de Débito", "Pix", "Dinheiro", "Cartão de Crédito"
+        "Cartão de Débito", "Pix", "Dinheiro", "Conta Corrente", "Cartão de Crédito"
     }:
         raise ValueError("Selecione um método de pagamento válido.")
     if metodo_pagamento == "Cartão de Crédito":
@@ -755,7 +1033,8 @@ def registrar_pagamento_parcela(parcela_id, metodo_pagamento, cartao_id=None):
     try:
         cursor.execute("BEGIN IMMEDIATE;")
         cursor.execute("""
-            SELECT p.*, c.descricao, c.categoria
+            SELECT p.*, c.descricao, c.categoria, c.metodo_pagamento AS compra_metodo,
+                   c.cartao_id AS compra_cartao_id
             FROM parcelas_detalhe p
             JOIN compras_parceladas c ON c.id = p.compra_id
             WHERE p.id = ?;
@@ -765,6 +1044,17 @@ def registrar_pagamento_parcela(parcela_id, metodo_pagamento, cartao_id=None):
             raise ValueError("A parcela selecionada não existe.")
         if parcela["status"] == "Pago":
             raise ValueError("Esta parcela já foi marcada como paga.")
+        if parcela["compra_metodo"] == "Cartão de Crédito":
+            cursor.execute("""
+                UPDATE parcelas_detalhe
+                SET status = 'Pago', metodo_pagamento_pago = ?, cartao_id_pago = NULL,
+                    lancamento_id = NULL
+                WHERE id = ? AND status != 'Pago';
+            """, (metodo_pagamento, parcela_id))
+            if cursor.rowcount != 1:
+                raise ValueError("Esta parcela já foi marcada como paga.")
+            conn.commit()
+            return
         data_pagamento = parcela["data_vencimento"] or date.today().isoformat()
         lancamento_id, cartao_usado = _inserir_lancamento(
             cursor, data_pagamento, parcela["descricao"], parcela["categoria"],
@@ -1522,26 +1812,26 @@ def toggle_recorrente_mes(recorrente_id, ano_mes, ativo):
     finally:
         conn.close()
 
-def add_cartao(nome, limite_total, fechamento_dia, vencimento_dia, cor="#3b82f6", bandeira="Mastercard"):
+def add_cartao(nome, limite_total, fechamento_dia, vencimento_dia, cor="#3b82f6", bandeira="Mastercard", limite_ilimitado=False, validade=None):
     """Cadastra novo cartão de crédito."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO cartoes (nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira, ativo)
-        VALUES (?, ?, ?, ?, ?, ?, 1);
-    """, (nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira))
+        INSERT INTO cartoes (nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira, limite_ilimitado, validade, ativo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1);
+    """, (nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira, int(limite_ilimitado), validade or None))
     conn.commit()
     conn.close()
 
-def update_cartao(cartao_id, nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira):
+def update_cartao(cartao_id, nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira, limite_ilimitado=False, validade=None):
     """Atualiza dados do cartão e recalcula faturas pendentes."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE cartoes
-        SET nome = ?, limite_total = ?, fechamento_dia = ?, vencimento_dia = ?, cor = ?, bandeira = ?
+        SET nome = ?, limite_total = ?, fechamento_dia = ?, vencimento_dia = ?, cor = ?, bandeira = ?, limite_ilimitado = ?, validade = ?
         WHERE id = ?;
-    """, (nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira, cartao_id))
+    """, (nome, limite_total, fechamento_dia, vencimento_dia, cor, bandeira, int(limite_ilimitado), validade or None, cartao_id))
 
     # Recalcular datas dos lançamentos e parcelas ligados a este cartão
     cursor.execute("SELECT id, data FROM lancamentos WHERE cartao_id = ?;", (cartao_id,))

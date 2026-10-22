@@ -14,7 +14,7 @@
 
         <div class="d-flex align-items-center gap-2">
             <a href="{{ url_for('exportar_json') }}" class="btn-action btn-primary-action text-decoration-none">
-                <i class="bi bi-download"></i> Exportar JSON (Backup)
+                <i class="bi bi-download"></i> Criar backup local
             </a>
             <form action="{{ url_for('carregar_dados_demo') }}" method="POST" onsubmit="return confirm('Deseja recarregar o banco de dados com os dados demonstrativos?');">
                 <button type="submit" class="btn btn-outline-dark rounded-pill px-3" title="Recarregar Dados Demo">
@@ -24,9 +24,37 @@
         </div>
     </div>
 
-    <div class="card card-clean p-3 mb-4">
+    <div class="settings-layout">
+        <aside class="settings-sidebar" aria-label="Categorias de configurações">
+            <div class="settings-sidebar-title">Configurações</div>
+            <button type="button" class="settings-category active" data-settings-category="geral">
+                <i class="bi bi-sliders2"></i><span>Geral</span>
+            </button>
+            <button type="button" class="settings-category" data-settings-category="orcamento">
+                <i class="bi bi-wallet2"></i><span>Orçamento</span>
+            </button>
+            <button type="button" class="settings-category" data-settings-category="dados">
+                <i class="bi bi-database"></i><span>Dados e Backup</span>
+            </button>
+            <button type="button" class="settings-category" data-settings-category="privacidade">
+                <i class="bi bi-shield-check"></i><span>Privacidade</span>
+            </button>
+        </aside>
+
+        <main class="settings-content">
+            <div class="settings-category-heading">
+                <div>
+                    <div class="settings-eyebrow">Configurações</div>
+                    <h2 class="h4 fw-bold mb-1" id="settings-category-title">Geral</h2>
+                    <p class="text-muted small mb-0" id="settings-category-description">
+                        Preferências de exibição e ano de referência.
+                    </p>
+                </div>
+            </div>
+
+    <div class="card card-clean p-3 mb-4 d-none" data-settings-section="dados">
         <h5 class="fw-bold text-dark mb-2">
-            <i class="bi bi-cloud-upload me-2"></i>Importar backup JSON
+            <i class="bi bi-cloud-upload me-2"></i>Importar Backup Local
         </h5>
         <p class="small text-muted mb-3">
             O conteúdo será mesclado aos dados atuais. Registros iguais serão ignorados e conflitos
@@ -45,7 +73,37 @@
         </form>
     </div>
 
-    <div class="card card-clean p-3 mb-4">
+    <div class="card card-clean p-4 mb-4 d-none" data-settings-section="dados">
+        <div class="d-flex align-items-start gap-3 mb-3">
+            <div class="settings-icon"><i class="bi bi-database"></i></div>
+            <div>
+                <h5 class="fw-bold text-dark mb-1">Local do banco de dados</h5>
+                <p class="small text-muted mb-0">
+                    O SmartFinance usa um arquivo SQLite local. Ao migrar, uma cópia validada será criada
+                    no novo caminho e o arquivo atual será preservado.
+                </p>
+            </div>
+        </div>
+        <form action="{{ url_for('salvar_local_banco') }}" method="POST">
+        <label for="database_path" class="form-label fw-bold small text-muted">Local da base de dados</label>
+            <div class="input-group">
+                <input type="text" id="database_path" name="database_path" class="form-control"
+                   value="{{ database_info.path }}" readonly
+                       required>
+            <button type="submit" class="btn-action btn-neutral-action" formaction="{{ url_for('selecionar_pasta_banco') }}"
+                    onclick="return true;">
+                <i class="bi bi-folder2-open"></i> Selecionar caminho
+                </button>
+            <button type="submit" class="btn-action btn-primary-action"
+                    onclick="return confirm('Usar este local para o banco de dados?');">
+                <i class="bi bi-arrow-right-circle"></i> Migrar banco
+            </button>
+        </div>
+        <div class="form-text">Escolha uma pasta. O arquivo <strong>finance.db</strong> será criado nela ou usado se já existir.</div>
+        </form>
+    </div>
+
+    <div class="card card-clean p-3 mb-4" data-settings-section="geral">
         <form action="{{ url_for('salvar_ano_ativo') }}" method="POST" class="d-flex flex-column flex-sm-row align-items-sm-center gap-2">
             <label for="ano_ativo" class="fw-bold text-dark mb-0">Ano de referência</label>
             <input type="number" id="ano_ativo" name="ano_ativo" class="form-control" min="1" max="9999"
@@ -55,9 +113,24 @@
             </button>
             <span class="small text-muted">Você pode consultar anos anteriores ou planejar anos futuros. As rendas ficam salvas separadamente por ano.</span>
         </form>
+        <form action="{{ url_for('salvar_configuracoes') }}" method="POST" class="d-flex flex-column flex-sm-row align-items-sm-center gap-2 mt-3">
+            <input type="hidden" name="ano_ativo" value="{{ config.ano_ativo }}">
+            <input type="hidden" name="modo_renda" value="mensal">
+            <input type="hidden" name="salario_mensal" value="{{ config.salario }}">
+            <input type="hidden" name="outras_rendas_mensais" value="{{ config.outras_rendas }}">
+            <input type="hidden" name="saldo_conta_corrente" value="{{ config.saldo_conta_corrente }}">
+            <input type="hidden" name="valor_investido" value="{{ config.valor_investido }}">
+            <label for="formato_data" class="fw-bold text-dark mb-0">Formato de datas</label>
+            <select name="formato_data" id="formato_data" class="form-select" style="max-width: 260px;">
+                {% for valor, rotulo in data_formats.items() %}
+                <option value="{{ valor }}" {% if config.formato_data == valor %}selected{% endif %}>{{ rotulo }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn-action btn-neutral-action"><i class="bi bi-save"></i> Salvar</button>
+        </form>
     </div>
 
-    <div class="row g-4 mb-4 align-items-stretch">
+    <div class="row g-4 mb-4 align-items-stretch d-none" data-settings-section="orcamento">
 
         <!-- COLUNA 1: RENDAS MENSAIS E PATRIMÔNIO (MONOCROMÁTICO) -->
         <div class="col-12 col-lg-5 d-flex">
@@ -68,15 +141,6 @@
                 <form action="{{ url_for('salvar_configuracoes') }}" method="POST">
                     <input type="hidden" name="ano_ativo" value="{{ config.ano_ativo }}">
                     <input type="hidden" name="modo_renda" id="modo_renda" value="mensal">
-                    <div class="mb-3">
-                        <label for="formato_data" class="form-label fw-bold small text-muted">Formato das datas</label>
-                        <select name="formato_data" id="formato_data" class="form-select">
-                            {% for valor, rotulo in data_formats.items() %}
-                            <option value="{{ valor }}" {% if config.formato_data == valor %}selected{% endif %}>{{ rotulo }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
                     <div class="form-check form-switch mb-3">
                         <input class="form-check-input" type="checkbox" role="switch"
                                id="renda_variavel_mensal" name="renda_variavel_mensal" value="1"
@@ -256,7 +320,7 @@
 
     </div>
 
-    <section class="card card-clean border-danger p-4 mt-4" aria-labelledby="titulo-excluir-dados">
+    <section class="card card-clean border-danger p-4 mt-4 d-none" data-settings-section="privacidade" aria-labelledby="titulo-excluir-dados">
         <div class="d-flex align-items-start gap-3 mb-3">
             <i class="bi bi-exclamation-triangle-fill text-danger fs-4" aria-hidden="true"></i>
             <div>
@@ -311,6 +375,9 @@
         </form>
     </section>
 
+        </main>
+    </div>
+
 </div>
 {% endblock %}
 
@@ -318,6 +385,46 @@
 {{ super() }}
 <script>
 (() => {
+    const categorias = {
+        geral: {
+            titulo: "Geral",
+            descricao: "Preferências de exibição e ano de referência."
+        },
+        dados: {
+            titulo: "Dados e backup",
+            descricao: "Escolha onde o banco local será armazenado e gerencie cópias de segurança."
+        },
+        orcamento: {
+            titulo: "Orçamento",
+            descricao: "Configure suas rendas, patrimônio e limites mensais."
+        },
+        privacidade: {
+            titulo: "Privacidade",
+            descricao: "Ações permanentes para excluir dados financeiros."
+        }
+    };
+    const botoesCategoria = document.querySelectorAll("[data-settings-category]");
+    const secoesConfiguracao = document.querySelectorAll("[data-settings-section]");
+    const tituloCategoria = document.getElementById("settings-category-title");
+    const descricaoCategoria = document.getElementById("settings-category-description");
+
+    function selecionarCategoria(categoria) {
+        const textos = categorias[categoria];
+        botoesCategoria.forEach((botao) => {
+            botao.classList.toggle("active", botao.dataset.settingsCategory === categoria);
+        });
+        secoesConfiguracao.forEach((secao) => {
+            secao.classList.toggle("d-none", secao.dataset.settingsSection !== categoria);
+        });
+        tituloCategoria.textContent = textos.titulo;
+        descricaoCategoria.textContent = textos.descricao;
+    }
+
+    botoesCategoria.forEach((botao) => {
+        botao.addEventListener("click", () => selecionarCategoria(botao.dataset.settingsCategory));
+    });
+    selecionarCategoria("geral");
+
     const tipo = document.getElementById("tipo-exclusao");
     const referencia = document.getElementById("referencia-exclusao");
     const referenciaContainer = document.getElementById("referencia-container");

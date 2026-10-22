@@ -63,7 +63,27 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // 15. Contraste das barras de limite nos cartões
     setupCreditCardProgressContrast();
+
+    // 16. Manter o aplicativo ativo enquanto alguma aba estiver aberta
+    setupBrowserHeartbeat();
 });
+
+function setupBrowserHeartbeat() {
+    const intervalo = 5000;
+    const enviarHeartbeat = function () {
+        fetch("/api/navegador/heartbeat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+            keepalive: true
+        }).catch(function () {
+            // O servidor pode estar encerrando; não há ação útil no navegador.
+        });
+    };
+
+    enviarHeartbeat();
+    window.setInterval(enviarHeartbeat, intervalo);
+}
 
 function formatarDataLocal(dataIso) {
     const partes = String(dataIso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -431,7 +451,8 @@ function setupModalPagamento() {
     window.abrirModalPagamento = function (botao) {
         form.action = botao.dataset.paymentUrl;
         document.getElementById("descricaoModalPagamento").textContent =
-            `${botao.dataset.paymentDescription}. O lançamento será criado após sua confirmação.`;
+            `${botao.dataset.paymentDescription}. A parcela será marcada como paga após sua confirmação. ` +
+            "Em compras no cartão, a parcela será quitada na fatura do mês, sem criar uma nova compra.";
         document.getElementById("tituloModalPagamento").textContent =
             botao.dataset.paymentMonth ? "Registrar pagamento recorrente" : "Registrar pagamento da parcela";
         document.getElementById("mesPagamento").value = botao.dataset.paymentMonth || "";
@@ -891,7 +912,7 @@ function formatarValorBR(valor) {
 }
 
 // Preenchimento de modal de edição de lançamentos
-function preencherModalEdicaoLancamento(id, data, desc, cat, val, met, cid, obs) {
+function preencherModalEdicaoLancamento(id, data, desc, cat, val, met, cid, obs, tipo) {
     const form = document.getElementById("formEditarLancamento");
     if (!form) return;
     form.action = `/lancamentos/editar/${id}`;
@@ -900,6 +921,7 @@ function preencherModalEdicaoLancamento(id, data, desc, cat, val, met, cid, obs)
     document.getElementById("edit_descricao").value = desc;
     document.getElementById("edit_categoria").value = cat;
     document.getElementById("edit_valor").value = val;
+    document.getElementById("edit_tipo").value = tipo || "Despesa";
     const metodoSelect = document.getElementById("edit_metodo_pagamento");
     metodoSelect.value = met;
     document.getElementById("edit_observacao").value = obs || "";
@@ -913,12 +935,13 @@ function preencherModalEdicaoLancamento(id, data, desc, cat, val, met, cid, obs)
 }
 
 // Preenchimento de modal de edição de cartões
-function preencherModalEdicaoCartao(id, nome, lim, fech, venc, cor, band) {
+function preencherModalEdicaoCartao(id, nome, lim, fech, venc, cor, band, ilimitado, validade) {
     const form = document.getElementById("formEditarCartao");
     if (!form) return;
     form.action = `/cartoes/editar/${id}`;
     document.getElementById("edit_cartao_nome").value = nome;
     document.getElementById("edit_cartao_limite").value = lim;
+    document.getElementById("edit_limite_ilimitado").checked = ilimitado === "1";
     document.getElementById("edit_cartao_fechamento").value = fech;
     document.getElementById("edit_cartao_vencimento").value = venc;
     document.getElementById("edit_cartao_cor").value = cor;
@@ -927,6 +950,7 @@ function preencherModalEdicaoCartao(id, nome, lim, fech, venc, cor, band) {
         return option.value === cor;
     }) ? cor : "";
     document.getElementById("edit_cartao_bandeira").value = band;
+    document.getElementById("edit_cartao_validade").value = validade || "";
 
     const editModal = new bootstrap.Modal(document.getElementById("modalEditarCartao"));
     editModal.show();

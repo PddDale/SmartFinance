@@ -22,7 +22,8 @@
         </div>
     </div>
 
-    {% if grupos_pagamentos_recorrentes %}
+    {% include "_notificacoes_financeiras.html" %}
+    {% if false %}
     <section class="card card-clean p-3 mb-4 border-start border-4 border-warning"
              aria-labelledby="cobrancas-recorrentes-pendentes">
         <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-2">
@@ -195,6 +196,9 @@
                         <td class="text-muted small fw-semibold">{{ l.data | data_br }}</td>
                         <td>
                             <span class="fw-bold text-dark">{{ l.descricao }}</span>
+                            {% if l.tipo in ['Estorno', 'Pagamento avulso'] %}
+                            <span class="badge bg-success-subtle text-success border border-success-subtle ms-1">+ {{ l.tipo }}</span>
+                            {% endif %}
                         </td>
                         <td>
                             {% set cor = l.categoria_cor or '#6b7280' %}
@@ -227,8 +231,8 @@
                         <td class="small text-muted">
                             {{ l.observacao or '-' }}
                         </td>
-                        <td class="text-end fw-bold text-dark fs-6">
-                            -{{ l.valor | moeda }}
+                        <td class="text-end fw-bold {% if l.tipo in ['Estorno', 'Pagamento avulso'] %}text-success{% else %}text-dark{% endif %} fs-6">
+                            {% if l.tipo in ['Estorno', 'Pagamento avulso'] %}+{% else %}-{% endif %}{{ l.valor | moeda }}
                         </td>
                         <td class="text-center">
                             <div class="btn-group btn-group-sm">
@@ -243,7 +247,8 @@
                                             '{{ l.valor }}',
                                             '{{ l.metodo_pagamento }}',
                                             '{{ l.cartao_id or '' }}',
-                                            '{{ l.observacao or '' | escape }}'
+                                            '{{ l.observacao or '' | escape }}',
+                                            '{{ l.tipo or "Despesa" }}'
                                         )">
                                     <i class="bi bi-pencil"></i>
                                 </button>
@@ -322,6 +327,7 @@
                             <select class="form-select" id="excel_metodo">
                                 <option value="Pix" selected>Pix</option>
                                 <option value="Cartão de Débito">Cartão de Débito</option>
+                                <option value="Conta Corrente">Conta Corrente</option>
                                 <option value="Dinheiro">Dinheiro</option>
                                 <option value="Cartão de Crédito">Cartão de Crédito</option>
                             </select>
@@ -415,9 +421,18 @@
                             </select>
                         </div>
                         <div class="col-md-6">
+                            <label class="form-label fw-bold small text-muted">Tipo de lançamento</label>
+                            <select class="form-select" name="tipo" id="edit_tipo" required>
+                                <option value="Despesa">Despesa</option>
+                                <option value="Estorno">Estorno (+)</option>
+                                <option value="Pagamento avulso">Pagamento avulso (+)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
                             <label class="form-label fw-bold small text-muted">Método de Pagamento</label>
                             <select class="form-select" name="metodo_pagamento" id="edit_metodo_pagamento" required>
                                 <option value="Cartão de Débito">Cartão de Débito</option>
+                                <option value="Conta Corrente">Conta Corrente</option>
                                 <option value="Pix">Pix</option>
                                 <option value="Dinheiro">Dinheiro</option>
                                 <option value="Cartão de Crédito">Cartão de Crédito</option>

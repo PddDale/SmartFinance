@@ -85,6 +85,22 @@
         </div>
     </nav>
 
+    {% if request.endpoint == 'index' %}
+    <div class="container-fluid px-lg-4 pt-3">
+        <div class="card card-clean p-3 mb-3 dashboard-date">
+            <div class="d-flex align-items-center gap-3">
+                <div class="kpi-icon-box"><i class="bi bi-calendar-date"></i></div>
+                <div>
+                    <div class="fw-bold text-dark">{{ global_saudacao }}!</div>
+                    <div class="small text-muted">{{ global_data_atual | data_br }}</div>
+                </div>
+            </div>
+        </div>
+
+        {% include "_notificacoes_financeiras.html" %}
+    </div>
+    {% endif %}
+
     <!-- CABEÇALHO / CARDS DE KPIS PATRIMONIAIS (BRANCO, PRETO E CINZA) -->
     <section class="py-3">
         <div class="container-fluid px-lg-4">
@@ -309,9 +325,19 @@
                                 </select>
                             </div>
                             <div class="col-md-6">
+                                <label class="form-label fw-bold small text-muted">Tipo de lançamento</label>
+                                <select class="form-select" name="tipo" id="modal_tipo" required>
+                                    <option value="Despesa">Despesa</option>
+                                    <option value="Estorno">Estorno (+)</option>
+                                    <option value="Pagamento avulso">Pagamento avulso (+)</option>
+                                </select>
+                                <div class="form-text">Estornos e pagamentos avulsos entram com sinal positivo.</div>
+                            </div>
+                            <div class="col-md-6">
                                 <label class="form-label fw-bold small text-muted">Método de Pagamento</label>
                                 <select class="form-select" name="metodo_pagamento" id="modal_metodo_pagamento" required>
                                     <option value="Cartão de Débito">Cartão de Débito</option>
+                                    <option value="Conta Corrente">Conta Corrente</option>
                                     <option value="Pix">Pix</option>
                                     <option value="Dinheiro">Dinheiro</option>
                                     <option value="Cartão de Crédito" selected>Cartão de Crédito</option>
@@ -471,7 +497,11 @@
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold small text-muted">Limite Total (R$)</label>
-                                <input type="number" step="0.01" min="1" class="form-control fw-bold" name="limite_total" placeholder="5000,00" required>
+                                <input type="number" step="0.01" min="1" class="form-control fw-bold" name="limite_total" placeholder="5000,00">
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" name="limite_ilimitado" value="1" id="novo_limite_ilimitado">
+                                    <label class="form-check-label small" for="novo_limite_ilimitado">Cartão sem limite</label>
+                                </div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold small text-muted">Bandeira</label>
@@ -492,6 +522,11 @@
                                 <label class="form-label fw-bold small text-muted">Dia de Vencimento da Fatura</label>
                                 <input type="number" min="1" max="31" class="form-control" name="vencimento_dia" value="5" required>
                                 <div class="form-text small">Dia do pagamento do boleto.</div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-bold small text-muted">Validade do cartão</label>
+                                <input type="date" class="form-control" name="validade">
+                                <div class="form-text">Usada para avisar quando o cartão estiver perto de expirar.</div>
                             </div>
                             <div class="col-12">
                                 <label class="form-label fw-bold small text-muted">Cor do Cartão</label>
@@ -538,6 +573,7 @@
                         <label class="form-label fw-bold small text-muted" for="metodo_pagamento_pago">Método de pagamento</label>
                         <select class="form-select mb-3" name="metodo_pagamento" id="metodo_pagamento_pago" required>
                             <option value="Cartão de Débito">Cartão de Débito</option>
+                            <option value="Conta Corrente">Conta Corrente</option>
                             <option value="Pix">Pix</option>
                             <option value="Dinheiro">Dinheiro</option>
                             <option value="Cartão de Crédito">Cartão de Crédito</option>
