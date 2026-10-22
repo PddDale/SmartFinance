@@ -190,6 +190,16 @@ class TestSmartFinance(unittest.TestCase):
         self.assertNotIn(b"detalhe interno do banco", response.data)
         self.assertIn(b"categorizar a despesa", response.data)
 
+    def test_database_selection_does_not_trust_submitted_path(self):
+        with patch.object(database, "use_database_path") as use_database_path:
+            response = self.app.post(
+                "/configuracoes/banco/usar",
+                data={"database_path": r"C:\Windows\system32\outside.db"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        use_database_path.assert_not_called()
+
     def test_secret_key_is_not_the_previous_hard_coded_value(self):
         self.assertNotEqual(
             app.secret_key,
@@ -949,6 +959,7 @@ class TestSmartFinance(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 400)
                 self.assertIn(b"Linha 3", response.data)
+                self.assertNotIn(b"categoria inv", response.data)
                 conn = database.get_db_connection()
                 total = conn.execute(
                     "SELECT COUNT(*) FROM lancamentos;"

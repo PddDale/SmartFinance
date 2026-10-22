@@ -16,7 +16,17 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import sys
 from urllib.parse import urlsplit
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, Response
+from flask import (
+    Flask,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    jsonify,
+    Response,
+    session,
+)
 from jinja2 import pass_context
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -44,6 +54,8 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 _BROWSER_HEARTBEAT_TIMEOUT = 30
 _browser_heartbeat_lock = threading.Lock()
 _browser_heartbeat_at = time.monotonic()
+_pending_database_paths = {}
+_pending_database_paths_lock = threading.Lock()
 
 @app.errorhandler(RequestEntityTooLarge)
 def arquivo_muito_grande(_erro):
@@ -532,7 +544,25 @@ def importar_excel():
                     "observacao": "Importado de planilha Excel",
                 })
             except (IndexError, TypeError, ValueError) as erro:
-                erros.append(f"Linha {numero_linha}: {erro}")
+                app.logger.warning(
+                    "Linha %s ignorada durante a importação: %s",
+                    numero_linha,
+                    type(erro).__name__,
+                )
+                if (
+                    isinstance(erro, ValueError)
+                    and "padrão" in str(erro)
+                    and formato_decimal in {"brasileiro", "internacional"}
+                ):
+                    detalhe_erro = (
+                        f"valor incompatível com o padrão decimal "
+                        f"{formato_decimal}."
+                    )
+                else:
+                    detalhe_erro = "dados inválidos ou incompletos."
+                erros.append(
+                    f"Linha {numero_linha}: {detalhe_erro}"
+                )
                 if len(erros) == 10:
                     break
         if erros:
@@ -1119,13 +1149,14 @@ def configuracoes():
 def salvar_local_banco():
     """Moves the SQLite database to a new user-selected path."""
     try:
-        caminho = request.form.get("database_path", "").strip()
-        if not caminho:
-            raise ValueError("Informe o caminho completo do novo arquivo .db.")
-        novo_caminho = database.migrate_database(caminho)
+        novo_caminho = database.migrate_database(database.DB_PATH)
         flash(f"Banco de dados migrado com sucesso para {novo_caminho}.", "success")
     except (OSError, ValueError, sqlite3.DatabaseError) as erro:
-        flash(f"Não foi possível migrar o banco de dados: {erro}", "danger")
+        app.logger.warning(
+            "Não foi possível migrar o banco de dados: %s",
+            type(erro).__name__,
+        )
+        flash("Não foi possível migrar o banco de dados.", "danger")
     return redirect(url_for("configuracoes"))
 
 @app.route("/configuracoes/banco/selecionar-pasta", methods=["POST"])
@@ -1145,21 +1176,42 @@ def selecionar_pasta_banco():
         if destino.resolve() == atual:
             flash("Esta pasta já é o local atual do banco de dados.", "info")
         elif destino.exists() and not database.database_file_is_identical(atual, destino):
+            pending_token = secrets.token_urlsafe(32)
+            with _pending_database_paths_lock:
+                _pending_database_paths[pending_token] = str(destino.resolve())
+            session["pending_database_token"] = pending_token
             return render_template("escolha_banco.html", database_path=str(destino))
         else:
             database.use_database_path(destino)
             flash("Local do banco de dados atualizado com sucesso.", "success")
     except (OSError, sqlite3.Error, ValueError, ImportError) as erro:
-        flash(f"Não foi possível selecionar a pasta: {erro}", "danger")
+        app.logger.warning(
+            "Não foi possível selecionar a pasta do banco: %s",
+            type(erro).__name__,
+        )
+        flash("Não foi possível selecionar a pasta do banco de dados.", "danger")
     return redirect(url_for("configuracoes"))
 
 @app.route("/configuracoes/banco/usar", methods=["POST"])
 def usar_banco_selecionado():
     try:
-        database.use_database_path(request.form.get("database_path", ""))
+        pending_token = session.pop("pending_database_token", None)
+        with _pending_database_paths_lock:
+            caminho = (
+                _pending_database_paths.pop(pending_token, None)
+                if pending_token
+                else None
+            )
+        if caminho is None:
+            raise ValueError("Nenhum banco selecionado pelo diálogo de pastas.")
+        database.use_database_path(caminho)
         flash("O banco de dados escolhido passou a ser usado.", "success")
     except (OSError, sqlite3.Error, ValueError) as erro:
-        flash(f"Não foi possível usar o banco escolhido: {erro}", "danger")
+        app.logger.warning(
+            "Não foi possível usar o banco escolhido: %s",
+            type(erro).__name__,
+        )
+        flash("Não foi possível usar o banco escolhido.", "danger")
     return redirect(url_for("configuracoes"))
 
 @app.route("/configuracoes/salvar", methods=["POST"])
