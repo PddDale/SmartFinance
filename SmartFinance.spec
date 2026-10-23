@@ -13,7 +13,7 @@ a = Analysis(
         (str(RESOURCE_ROOT / "templates"), "Recursos/Interface/templates"),
         (str(RESOURCE_ROOT / "static"), "Recursos/Interface/static"),
     ],
-    hiddenimports=["waitress"],
+    hiddenimports=["waitress", "tkinter", "tkinter.filedialog"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

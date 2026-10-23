@@ -32,8 +32,6 @@ Var DesktopCheckbox
 Var CreateStartMenuShortcut
 Var CreateDesktopShortcut
 Var MigrationDialog
-Var MigrationEdit
-Var MigrationBrowseButton
 Var MigrationExistingRadio
 Var MigrationFolderRadio
 Var MigrationEmptyRadio

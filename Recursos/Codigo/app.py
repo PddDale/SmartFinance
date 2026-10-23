@@ -30,6 +30,12 @@ from flask import (
 from jinja2 import pass_context
 from werkzeug.exceptions import RequestEntityTooLarge
 
+try:
+    from tkinter import TclError as TkinterError
+except ImportError:
+    class TkinterError(ImportError):
+        """Fallback used when Tkinter is not available in the runtime."""
+
 if __package__:
     from . import backup as backup_tools, database, models
 else:
@@ -1163,6 +1169,28 @@ def configuracoes():
         database_info=database.get_database_info(),
     )
 
+def _selecionar_pasta_banco_dialogo():
+    """Opens a native folder picker without requiring Tk on the server thread."""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    try:
+        root.withdraw()
+        root.attributes("-topmost", True)
+        root.update_idletasks()
+        pasta = filedialog.askdirectory(
+            parent=root,
+            title="Escolha a pasta do banco de dados",
+        )
+        root.attributes("-topmost", False)
+        return pasta
+    finally:
+        try:
+            root.destroy()
+        except TkinterError:
+            app.logger.debug("A janela do seletor de pastas já estava fechada.")
+
 @app.route("/configuracoes/banco", methods=["POST"])
 def salvar_local_banco():
     """Moves the SQLite database to a new user-selected path."""
@@ -1181,12 +1209,7 @@ def salvar_local_banco():
 def selecionar_pasta_banco():
     """Abre o seletor de pastas do Windows para escolher o banco local."""
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        pasta = filedialog.askdirectory(title="Escolha a pasta do banco de dados")
-        root.destroy()
+        pasta = _selecionar_pasta_banco_dialogo()
         if not pasta:
             return redirect(url_for("configuracoes"))
         destino = Path(pasta) / "finance.db"
@@ -1202,9 +1225,18 @@ def selecionar_pasta_banco():
         else:
             database.use_database_path(destino)
             flash("Local do banco de dados atualizado com sucesso.", "success")
-    except (OSError, sqlite3.Error, ValueError, ImportError) as erro:
-        app.logger.warning(
-            "Não foi possível selecionar a pasta do banco: %s",
+    except (
+        OSError,
+        sqlite3.Error,
+        ValueError,
+        ImportError,
+        TkinterError,
+        AttributeError,
+        TypeError,
+        OverflowError,
+    ) as erro:
+        app.logger.exception(
+            "Não foi possível selecionar a pasta do banco (%s).",
             type(erro).__name__,
         )
         flash("Não foi possível selecionar a pasta do banco de dados.", "danger")
